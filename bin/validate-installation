@@ -1,0 +1,237 @@
+#!/usr/bin/env ruby
+
+require 'yaml'
+
+class InstallationValidator
+  def initialize
+    @checks = []
+    @verbose = ARGV.include?('-v') || ARGV.include?('--verbose')
+  end
+  
+  def run
+    puts "=== Cellular Automata Engine Installation Validation ==="
+    puts
+    
+    check_ruby_installation
+    check_required_files
+    check_directory_structure
+    check_dependencies
+    check_cli_tools
+    check_configuration
+    run_smoke_tests
+    
+    print_results
+  end
+  
+  private
+  
+  def add_check(name, status, message = nil)
+    @checks << { name: name, status: status, message: message }
+    
+    if @verbose || status != :pass
+      icon = case status
+      when :pass then "✓"
+      when :fail then "✗"
+      when :warn then "⚠"
+      end
+      
+      print "#{icon} #{name}"
+      puts message ? " - #{message}" : ""
+    end
+  end
+  
+  def check_ruby_installation
+    required_version = File.read('.ruby-version').strip rescue '3.4.0'
+    current_version = RUBY_VERSION
+    
+    if Gem::Version.new(current_version) >= Gem::Version.new(required_version)
+      add_check("Ruby version", :pass, "#{current_version} >= #{required_version}")
+    else
+      add_check("Ruby version", :fail, "#{current_version} < #{required_version}")
+    end
+  rescue => e
+    add_check("Ruby version", :fail, e.message)
+  end
+  
+  def check_required_files
+    required_files = [
+      'Gemfile',
+      'Gemfile.lock',
+      'README.md',
+      'CLAUDE.md',
+      '.ruby-version'
+    ]
+    
+    required_files.each do |file|
+      if File.exist?(file)
+        add_check("File: #{file}", :pass)
+      else
+        add_check("File: #{file}", :fail, "Missing required file")
+      end
+    end
+  end
+  
+  def check_directory_structure
+    required_dirs = [
+      'bin',
+      'lib',
+      'lib/automata',
+      'lib/automata/grid',
+      'config',
+      'spec',
+      'spec/automata',
+      'spec/performance'
+    ]
+    
+    required_dirs.each do |dir|
+      if Dir.exist?(dir)
+        add_check("Directory: #{dir}", :pass)
+      else
+        add_check("Directory: #{dir}", :fail, "Missing required directory")
+      end
+    end
+  end
+  
+  def check_dependencies
+    # Check if bundle is installed
+    unless system('which bundle > /dev/null 2>&1')
+      add_check("Bundler", :fail, "Bundler not installed")
+      return
+    end
+    
+    # Check if dependencies are satisfied
+    if system('bundle check > /dev/null 2>&1')
+      add_check("Dependencies", :pass, "All gems installed")
+    else
+      add_check("Dependencies", :warn, "Run 'bundle install' to install missing gems")
+    end
+    
+    # Check specific important gems
+    check_gem('rspec', required: true)
+    check_gem('rmagick', required: false)
+    check_gem('parallel', required: false)
+  end
+  
+  def check_gem(gem_name, required: true)
+    require gem_name
+    add_check("Gem: #{gem_name}", :pass)
+  rescue LoadError
+    if required
+      add_check("Gem: #{gem_name}", :fail, "Required gem not installed")
+    else
+      add_check("Gem: #{gem_name}", :warn, "Optional gem not installed")
+    end
+  end
+  
+  def check_cli_tools
+    cli_tools = [
+      'automata-generator',
+      'grid-visualizer',
+      'pattern-analyzer',
+      'export-engine',
+      'test-runner',
+      'setup-development',
+      'validate-installation',
+      'terrain-generator',
+      'world-generator',
+      'settlement-generator',
+      'voxel-viewer'
+    ]
+    
+    cli_tools.each do |tool|
+      path = File.join('bin', tool)
+      
+      if File.exist?(path)
+        if File.executable?(path)
+          add_check("CLI tool: #{tool}", :pass)
+        else
+          add_check("CLI tool: #{tool}", :warn, "Not executable")
+        end
+      else
+        add_check("CLI tool: #{tool}", :fail, "Missing")
+      end
+    end
+  end
+  
+  def check_configuration
+    config_files = [
+      'config/automata.yml',
+      'config/grids.yml',
+      'config/export.yml'
+    ]
+    
+    config_files.each do |file|
+      if File.exist?(file)
+        begin
+          YAML.load_file(file)
+          add_check("Config: #{File.basename(file)}", :pass)
+        rescue => e
+          add_check("Config: #{File.basename(file)}", :fail, "Invalid YAML: #{e.message}")
+        end
+      else
+        add_check("Config: #{File.basename(file)}", :fail, "Missing")
+      end
+    end
+  end
+  
+  def run_smoke_tests
+    # Test basic functionality
+    smoke_tests = [
+      {
+        name: "Help command",
+        command: "./bin/automata-generator --help > /dev/null 2>&1"
+      },
+      {
+        name: "Grid library",
+        command: "ruby -r./lib/automata/grid/base_grid -e 'BaseGrid.new(10,10)' 2>&1"
+      },
+      {
+        name: "Test suite",
+        command: "./bin/test-runner --format progress > /dev/null 2>&1"
+      }
+    ]
+    
+    smoke_tests.each do |test|
+      if system(test[:command])
+        add_check(test[:name], :pass)
+      else
+        add_check(test[:name], :fail, "Command failed")
+      end
+    end
+  end
+  
+  def print_results
+    puts "\n=== Validation Results ==="
+    
+    passed = @checks.count { |c| c[:status] == :pass }
+    failed = @checks.count { |c| c[:status] == :fail }
+    warned = @checks.count { |c| c[:status] == :warn }
+    
+    puts "Total checks: #{@checks.length}"
+    puts "  ✓ Passed: #{passed}"
+    puts "  ✗ Failed: #{failed}"
+    puts "  ⚠ Warnings: #{warned}"
+    
+    if failed > 0
+      puts "\n❌ Installation validation FAILED"
+      puts "Please fix the errors above and run validation again."
+      exit 1
+    elsif warned > 0
+      puts "\n⚠️  Installation validation PASSED with warnings"
+      puts "Some optional features may not work correctly."
+      exit 0
+    else
+      puts "\n✅ Installation validation PASSED"
+      puts "Cellular Automata Engine is ready to use!"
+      
+      unless @verbose
+        puts "\nRun with -v flag for detailed output."
+      end
+      
+      exit 0
+    end
+  end
+end
+
+# Run validation
+InstallationValidator.new.run

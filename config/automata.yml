@@ -1,0 +1,80 @@
+# Cellular Automata Engine - Default Automata Rules and Parameters
+
+# Conway's Game of Life rules
+conway:
+  name: "Conway's Game of Life"
+  description: "Classic cellular automaton with birth/survival rules"
+  rules:
+    birth: [3]         # Cell is born if it has exactly 3 neighbors
+    survival: [2, 3]   # Cell survives if it has 2 or 3 neighbors
+  default_state: 0     # Dead cell
+  states: 2            # Binary: dead (0) or alive (1)
+
+# Cave generation rules (for terrain)
+cave:
+  name: "Cave Generation"
+  description: "Creates cave-like structures for terrain generation"
+  rules:
+    birth: [6, 7, 8]   # Cell becomes solid with 6-8 neighbors
+    survival: [3, 4, 5, 6, 7, 8]  # Cell stays solid with 3-8 neighbors
+  default_state: 0
+  states: 2
+  iterations: 5        # Number of smoothing iterations
+
+# Forest growth patterns
+forest:
+  name: "Forest Growth"
+  description: "Simulates forest expansion and clearing"
+  rules:
+    birth: [3, 4]      # Tree grows with 3-4 tree neighbors
+    survival: [2, 3, 4, 5, 6, 7]  # Tree survives with 2-7 neighbors
+  default_state: 0
+  states: 2
+  growth_rate: 0.15    # Probability of spontaneous growth
+
+# Settlement growth rules
+settlement:
+  name: "Settlement Growth"
+  description: "Models how settlements expand over time"
+  rules:
+    birth: [3, 4, 5]   # New building with 3-5 neighbors
+    survival: [2, 3, 4, 5, 6, 7, 8]  # Building persists
+  default_state: 0
+  states: 3            # Empty (0), residential (1), commercial (2)
+  growth_factors:
+    water_proximity: 1.5
+    road_proximity: 2.0
+    resource_proximity: 1.2
+
+# Magic field propagation
+magic:
+  name: "Magic Field Dynamics"
+  description: "Simulates magical energy propagation"
+  rules:
+    birth: [2, 3]      # Magic spreads with 2-3 charged neighbors
+    survival: [1, 2, 3, 4]  # Magic persists with 1-4 neighbors
+  default_state: 0
+  states: 5            # Different magic intensity levels
+  decay_rate: 0.1      # Magic field decay over time
+
+# Custom rule template
+custom:
+  name: "Custom Rules"
+  description: "User-defined cellular automaton"
+  rules:
+    birth: []          # Define birth conditions
+    survival: []       # Define survival conditions
+  default_state: 0
+  states: 2
+
+# Probabilistic automata settings
+probabilistic:
+  name: "Probabilistic Automaton"
+  description: "Rules with random elements"
+  base_rules:
+    birth: [3]
+    survival: [2, 3]
+  probability:
+    birth_chance: 0.9   # Probability rule applies when conditions met
+    survival_chance: 0.95
+    mutation_rate: 0.01 # Chance of spontaneous state change

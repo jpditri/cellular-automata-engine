@@ -1,0 +1,160 @@
+# Cellular Automata Engine - Output Format and Quality Settings
+
+# Image export formats
+image_formats:
+  png:
+    name: "PNG"
+    extension: ".png"
+    description: "Portable Network Graphics"
+    quality_settings:
+      compression: 6      # 0-9, higher = smaller file
+      interlaced: false
+    cell_rendering:
+      size: 10           # Pixels per cell
+      border: 1          # Border width in pixels
+      border_color: "#333333"
+      
+  svg:
+    name: "SVG"
+    extension: ".svg"
+    description: "Scalable Vector Graphics"
+    cell_rendering:
+      size: 10           # Units per cell
+      border: 0.5        # Border width
+      border_color: "#333333"
+      optimize: true     # Optimize for file size
+      
+  ascii:
+    name: "ASCII Art"
+    extension: ".txt"
+    description: "Text-based visualization"
+    characters:
+      dead: " "
+      alive: "#"
+      water: "~"
+      mountain: "^"
+      forest: "*"
+      settlement: "@"
+      road: "+"
+    width: 80            # Characters per line
+
+# Data export formats
+data_formats:
+  json:
+    name: "JSON"
+    extension: ".json"
+    description: "JavaScript Object Notation"
+    pretty_print: true
+    include_metadata: true
+    compression: false
+    
+  csv:
+    name: "CSV"
+    extension: ".csv"
+    description: "Comma-separated values"
+    delimiter: ","
+    include_headers: true
+    
+  numpy:
+    name: "NumPy Array"
+    extension: ".npy"
+    description: "NumPy binary format"
+    compress: true
+
+# Animation export
+animation:
+  gif:
+    name: "Animated GIF"
+    extension: ".gif"
+    frame_delay: 100     # Milliseconds between frames
+    loop: true
+    optimize: true
+    
+  mp4:
+    name: "MP4 Video"
+    extension: ".mp4"
+    fps: 10
+    codec: "h264"
+    quality: "high"
+
+# Quality presets
+quality_presets:
+  draft:
+    name: "Draft Quality"
+    description: "Fast rendering, lower quality"
+    image:
+      cell_size: 5
+      border_width: 0
+      antialiasing: false
+      
+  standard:
+    name: "Standard Quality"
+    description: "Balanced speed and quality"
+    image:
+      cell_size: 10
+      border_width: 1
+      antialiasing: true
+      
+  high:
+    name: "High Quality"
+    description: "Best quality, slower rendering"
+    image:
+      cell_size: 20
+      border_width: 2
+      antialiasing: true
+      supersampling: 2
+
+# Color schemes
+color_schemes:
+  classic:
+    name: "Classic"
+    dead: "#FFFFFF"
+    alive: "#000000"
+    
+  terrain:
+    name: "Terrain"
+    water: "#4A90E2"
+    land: "#8B7355"
+    mountain: "#696969"
+    forest: "#228B22"
+    desert: "#F4A460"
+    snow: "#FFFAFA"
+    
+  heatmap:
+    name: "Heat Map"
+    gradient:
+      - "#000033"  # Cold
+      - "#0000FF"
+      - "#00FFFF"
+      - "#00FF00"
+      - "#FFFF00"
+      - "#FF0000"  # Hot
+      
+  d&d:
+    name: "D&D Campaign"
+    water: "#5DADE2"
+    plains: "#A9DFBF"
+    forest: "#27AE60"
+    mountain: "#7B7D7D"
+    desert: "#F8C471"
+    swamp: "#145A32"
+    settlement: "#E74C3C"
+    road: "#95A5A6"
+
+# Output directory structure
+output:
+  base_directory: "output"
+  subdirectories:
+    images: "images"
+    data: "data"
+    animations: "animations"
+    maps: "maps"
+  filename_template: "{name}_{timestamp}_{iteration}"
+  timestamp_format: "%Y%m%d_%H%M%S"
+
+# Default settings
+defaults:
+  image_format: "png"
+  data_format: "json"
+  quality_preset: "standard"
+  color_scheme: "classic"

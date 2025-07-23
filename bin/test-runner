@@ -1,0 +1,153 @@
+#!/usr/bin/env ruby
+
+require 'optparse'
+require 'fileutils'
+
+class TestRunner
+  def initialize
+    @options = {
+      pattern: 'spec/**/*_spec.rb',
+      format: 'progress',
+      coverage: true,
+      profile: false,
+      seed: nil,
+      tag: nil,
+      verbose: false
+    }
+  end
+  
+  def run(args)
+    parse_options(args)
+    
+    # Ensure we're in the project root
+    unless File.exist?('Gemfile')
+      puts "Error: Must run from project root directory"
+      exit 1
+    end
+    
+    # Check if dependencies are installed
+    unless system('bundle check > /dev/null 2>&1')
+      puts "Installing dependencies..."
+      unless system('bundle install')
+        puts "Error: Failed to install dependencies"
+        exit 1
+      end
+    end
+    
+    # Build RSpec command
+    cmd = build_rspec_command
+    
+    puts "Running tests..." if @options[:verbose]
+    puts "Command: #{cmd}" if @options[:verbose]
+    
+    # Run tests
+    success = system(cmd)
+    
+    # Show coverage report location if enabled
+    if @options[:coverage] && success
+      puts "\nCoverage report generated at: coverage/index.html"
+    end
+    
+    exit(success ? 0 : 1)
+  end
+  
+  private
+  
+  def parse_options(args)
+    OptionParser.new do |opts|
+      opts.banner = "Usage: test-runner [options]"
+      
+      opts.on("-p", "--pattern PATTERN", "Test file pattern (default: spec/**/*_spec.rb)") do |pattern|
+        @options[:pattern] = pattern
+      end
+      
+      opts.on("-f", "--format FORMAT", "Output format: progress, documentation, json, html") do |format|
+        @options[:format] = format
+      end
+      
+      opts.on("-t", "--tag TAG", "Run only tests with specified tag") do |tag|
+        @options[:tag] = tag
+      end
+      
+      opts.on("-s", "--seed SEED", "Random seed for test order") do |seed|
+        @options[:seed] = seed
+      end
+      
+      opts.on("--no-coverage", "Disable code coverage") do
+        @options[:coverage] = false
+      end
+      
+      opts.on("--profile", "Profile slowest examples") do
+        @options[:profile] = true
+      end
+      
+      opts.on("--fail-fast", "Stop on first failure") do
+        @options[:fail_fast] = true
+      end
+      
+      opts.on("-v", "--verbose", "Verbose output") do
+        @options[:verbose] = true
+      end
+      
+      opts.on("-h", "--help", "Show this help message") do
+        puts opts
+        exit
+      end
+    end.parse!(args)
+  end
+  
+  def build_rspec_command
+    cmd = ['bundle', 'exec', 'rspec']
+    
+    # Add pattern
+    cmd << @options[:pattern]
+    
+    # Add format
+    cmd << "--format" << @options[:format]
+    
+    # Add tag filter if specified
+    cmd << "--tag" << @options[:tag] if @options[:tag]
+    
+    # Add seed if specified
+    cmd << "--seed" << @options[:seed] if @options[:seed]
+    
+    # Add profiling if enabled
+    cmd << "--profile" if @options[:profile]
+    
+    # Add fail-fast if enabled
+    cmd << "--fail-fast" if @options[:fail_fast]
+    
+    # Disable coverage in RSpec if needed
+    cmd << "--" << "NO_COVERAGE=true" unless @options[:coverage]
+    
+    cmd.join(' ')
+  end
+end
+
+# Handle special test commands
+case ARGV[0]
+when 'unit'
+  # Run only unit tests
+  ARGV.shift
+  ARGV.unshift('--pattern', 'spec/automata/**/*_spec.rb')
+when 'integration'
+  # Run only integration tests
+  ARGV.shift
+  ARGV.unshift('--pattern', 'spec/bin/**/*_spec.rb')
+when 'performance'
+  # Run performance benchmarks
+  puts "Running performance benchmarks..."
+  require_relative '../spec/performance/benchmark_runner'
+  BenchmarkRunner.new.run
+  exit 0
+when 'watch'
+  # Watch mode - rerun tests on file changes
+  puts "Watch mode not yet implemented"
+  puts "Consider using: bundle exec guard"
+  exit 1
+else
+  # Normal test run
+end
+
+# Run the test runner
+TestRunner.new.run(ARGV)

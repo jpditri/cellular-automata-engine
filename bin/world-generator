@@ -51,9 +51,9 @@ class WorldGenerator
     @height = 40
     @world_type = 'balanced'
     @seed = nil
-    @output_file = nil
+    @options[:output_file] = nil
     @verbose = false
-    @show_layers = []
+    @options[:show_layers] = []
   end
 
   def run(args)
@@ -80,11 +80,11 @@ class WorldGenerator
       when '--seed'
         @seed = args[i + 1].to_i if args[i + 1]
       when '--output'
-        @output_file = args[i + 1] if args[i + 1]
+        @options[:output_file] = args[i + 1] if args[i + 1]
       when '--verbose'
         @verbose = true
       when '--show-layers'
-        @show_layers = args[i + 1].split(',') if args[i + 1]
+        @options[:show_layers] = args[i + 1].split(',') if args[i + 1]
       end
     end
   end
@@ -107,15 +107,15 @@ class WorldGenerator
     display_world_overview(grid)
     
     # Show individual layers if requested
-    if @show_layers.any?
-      @show_layers.each { |layer| display_layer(grid, layer) }
+    if @options[:show_layers].any?
+      @options[:show_layers].each { |layer| display_layer(grid, layer) }
     end
     
     # Show world statistics
     show_world_statistics(grid)
     
     # Save to file if requested
-    save_world_to_file(grid, world_config) if @output_file
+    save_world_to_file(grid, world_config) if @options[:output_file]
   end
 
   def display_world_overview(grid)
@@ -222,16 +222,16 @@ class WorldGenerator
   def show_world_statistics(grid)
     stats = analyze_world(grid)
     
-    puts "\n📈 World Statistics:"
-    puts "   🌍 Total area: #{@width}x#{@height} (#{@width * @height} cells)"
-    puts "   🌊 Water coverage: #{stats[:water_cells]} cells (#{stats[:water_pct]}%)"
-    puts "   🏔️  Mountainous: #{stats[:mountain_cells]} cells (#{stats[:mountain_pct]}%)"
-    puts "   🌲 Forested: #{stats[:forest_cells]} cells (#{stats[:forest_pct]}%)"
-    puts "   🏘️  Settled: #{stats[:settlement_cells]} cells (#{stats[:settlement_pct]}%)"
-    puts "   🏰 Total population: #{stats[:total_population]}"
-    puts "   ⚔️  Dangerous areas: #{stats[:dangerous_cells]} cells (#{stats[:dangerous_pct]}%)"
-    puts "   ✨ Magical sites: #{stats[:magical_cells]} cells"
-    puts "   🗡️  Special features: #{stats[:special_features]} locations"
+    puts "\nWorld Statistics:"
+    puts "   Total area: #{@width}x#{@height} (#{@width * @height} cells)"
+    puts "   Water coverage: #{stats[:water_cells]} cells (#{stats[:water_pct]}%)"
+    puts "   Mountainous: #{stats[:mountain_cells]} cells (#{stats[:mountain_pct]}%)"
+    puts "   Forested: #{stats[:forest_cells]} cells (#{stats[:forest_pct]}%)"
+    puts "   Settled: #{stats[:settlement_cells]} cells (#{stats[:settlement_pct]}%)"
+    puts "   Total population: #{stats[:total_population]}"
+    puts "   Dangerous areas: #{stats[:dangerous_cells]} cells (#{stats[:dangerous_pct]}%)"
+    puts "   Magical sites: #{stats[:magical_cells]} cells"
+    puts "   Special features: #{stats[:special_features]} locations"
   end
 
   def analyze_world(grid)
@@ -275,11 +275,11 @@ class WorldGenerator
 
   def save_world_to_file(grid, config)
     content = generate_world_file_content(grid, config)
-    File.write(@output_file, content)
-    puts "💾 World saved to: #{@output_file}"
+    File.write(@options[:output_file], content)
+    puts "World saved to: #{@options[:output_file]}"
     
     # Also save detailed JSON if requested
-    if @output_file.end_with?('.json')
+    if @options[:output_file].end_with?('.json')
       save_detailed_json(grid)
     end
   end
@@ -310,7 +310,7 @@ class WorldGenerator
   end
 
   def save_detailed_json(grid)
-    json_file = @output_file.gsub(/\.[^.]+$/, '_detailed.json')
+    json_file = @options[:output_file].gsub(/\.[^.]+$/, '_detailed.json')
     
     world_data = {
       metadata: {
@@ -318,7 +318,7 @@ class WorldGenerator
         height: @height,
         seed: grid.seed,
         generation: grid.generation,
-        world_type: @world_type
+        world_type: @options[:rules]
       },
       cells: {}
     }
@@ -329,16 +329,16 @@ class WorldGenerator
     
     require 'json'
     File.write(json_file, JSON.pretty_generate(world_data))
-    puts "📊 Detailed data saved to: #{json_file}"
+    puts "Detailed data saved to: #{json_file}"
     
     # Also generate 3D voxel data if requested
-    if @output_file.include?('3d') || @show_layers.include?('voxel')
+    if @options[:output_file].include?('3d') || @options[:show_layers].include?('voxel')
       save_voxel_data(grid)
     end
   end
   
   def save_voxel_data(grid)
-    voxel_file = @output_file.gsub(/\.[^.]+$/, '_voxels.json')
+    voxel_file = @options[:output_file].gsub(/\.[^.]+$/, '_voxels.json')
     
     voxel_data = {
       metadata: {
@@ -346,7 +346,7 @@ class WorldGenerator
         height: @height,
         max_height: 32,
         seed: grid.seed,
-        world_type: @world_type,
+        world_type: @options[:rules],
         scale: { x: 0.25, y: 0.25, z: 0.25 },  # Very detailed small voxels
         voxel_size: 0.25  # Each voxel is 0.25 units (4x detail)
       },
@@ -355,7 +355,7 @@ class WorldGenerator
     
     require 'json'
     File.write(voxel_file, JSON.pretty_generate(voxel_data))
-    puts "🧊 3D surface voxel data saved to: #{voxel_file}"
+    puts "3D surface voxel data saved to: #{voxel_file}"
   end
   
   def generate_surface_voxels(grid)
@@ -817,35 +817,7 @@ class WorldGenerator
     end
   end
 
-  def show_help
-    puts "world-generator - Generate complete D&D worlds with layered ecosystems"
-    puts ""
-    puts "USAGE:"
-    puts "  ./bin/world-generator [OPTIONS]"
-    puts ""
-    puts "OPTIONS:"
-    puts "  --size WIDTHxHEIGHT    World size (default: 80x40)"
-    puts "  --type TYPE            World type (default: balanced)"
-    puts "  --seed NUMBER          Random seed for reproducible worlds"
-    puts "  --output FILE          Save world to file (.txt or .json)"
-    puts "  --verbose              Show generation progress"
-    puts "  --show-layers LIST     Show specific layers (comma-separated)"
-    puts "  --help, -h             Show this help"
-    puts ""
-    puts "WORLD TYPES:"
-    WORLD_TYPES.each do |type, config|
-      puts "  #{type.ljust(12)} #{config[:name]}"
-    end
-    puts ""
-    puts "AVAILABLE LAYERS:"
-    puts "  elevation, water, climate, biome, vegetation, settlement, resources, danger"
-    puts ""
-    puts "EXAMPLES:"
-    puts "  ./bin/world-generator --type mountainous --size 100x50"
-    puts "  ./bin/world-generator --seed 12345 --output kingdom.txt"
-    puts "  ./bin/world-generator --show-layers elevation,water,settlement"
-    puts "  ./bin/world-generator --type archipelago --verbose --output islands.json"
-  end
+  # Help is now handled by OptionParser
 end
 
 if __FILE__ == $0

@@ -1,0 +1,112 @@
+# Cellular Automata Engine - Grid Size and Type Configurations
+
+# Grid type definitions
+grid_types:
+  square:
+    name: "Square Grid"
+    description: "Traditional square grid with 8-neighbor connectivity"
+    neighbors: 8
+    connectivity: "moore"  # Moore neighborhood (8 neighbors)
+    coordinate_system: "cartesian"
+    
+  square_vonneumann:
+    name: "Square Grid (Von Neumann)"
+    description: "Square grid with 4-neighbor connectivity"
+    neighbors: 4
+    connectivity: "vonneumann"  # Von Neumann neighborhood (4 neighbors)
+    coordinate_system: "cartesian"
+    
+  hexagonal:
+    name: "Hexagonal Grid"
+    description: "Hexagonal grid with 6-neighbor connectivity"
+    neighbors: 6
+    connectivity: "hexagonal"
+    coordinate_system: "axial"  # Axial coordinates for hex grids
+    orientation: "pointy"       # Pointy-top hexagons
+
+# Predefined grid sizes
+grid_sizes:
+  tiny:
+    width: 10
+    height: 10
+    description: "Tiny grid for testing"
+    
+  small:
+    width: 50
+    height: 50
+    description: "Small grid for demos"
+    
+  medium:
+    width: 100
+    height: 100
+    description: "Medium grid for standard use"
+    
+  large:
+    width: 250
+    height: 250
+    description: "Large grid for detailed simulations"
+    
+  huge:
+    width: 500
+    height: 500
+    description: "Huge grid for world generation"
+    
+  massive:
+    width: 1000
+    height: 1000
+    description: "Massive grid (memory intensive)"
+
+# Performance settings by grid size
+performance:
+  tiny:
+    chunk_size: 10
+    parallel_threshold: false
+    
+  small:
+    chunk_size: 25
+    parallel_threshold: false
+    
+  medium:
+    chunk_size: 50
+    parallel_threshold: true
+    worker_threads: 2
+    
+  large:
+    chunk_size: 100
+    parallel_threshold: true
+    worker_threads: 4
+    
+  huge:
+    chunk_size: 250
+    parallel_threshold: true
+    worker_threads: 8
+    
+  massive:
+    chunk_size: 500
+    parallel_threshold: true
+    worker_threads: 16
+
+# Boundary conditions
+boundary_conditions:
+  wrap:
+    name: "Wrapping (Toroidal)"
+    description: "Edges wrap around to opposite side"
+    
+  fixed:
+    name: "Fixed Value"
+    description: "Edges have fixed state value"
+    default_value: 0
+    
+  mirror:
+    name: "Mirror"
+    description: "Edges mirror adjacent cells"
+    
+  absorb:
+    name: "Absorbing"
+    description: "Edges absorb activity (always dead)"
+
+# Default settings
+defaults:
+  grid_type: "square"
+  grid_size: "medium"
+  boundary_condition: "wrap"

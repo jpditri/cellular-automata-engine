@@ -1,0 +1,543 @@
+#!/usr/bin/env ruby
+
+require 'optparse'
+require 'json'
+require 'yaml'
+
+class PatternAnalyzer
+  def initialize
+    @options = {
+      input_file: nil,
+      analysis_type: 'all',
+      output_format: 'text',
+      verbose: false
+    }
+  end
+  
+  def run(args)
+    parse_options(args)
+    
+    unless @options[:input_file]
+      puts "Error: Input file required (use --input FILE)"
+      exit 1
+    end
+    
+    puts "Loading automaton data..." if @options[:verbose]
+    data = load_data(@options[:input_file])
+    
+    results = {}
+    
+    if @options[:analysis_type] == 'all' || @options[:analysis_type] == 'basic'
+      results[:basic] = analyze_basic_properties(data)
+    end
+    
+    if @options[:analysis_type] == 'all' || @options[:analysis_type] == 'patterns'
+      results[:patterns] = analyze_patterns(data)
+    end
+    
+    if @options[:analysis_type] == 'all' || @options[:analysis_type] == 'stability'
+      results[:stability] = analyze_stability(data)
+    end
+    
+    if @options[:analysis_type] == 'all' || @options[:analysis_type] == 'clusters'
+      results[:clusters] = analyze_clusters(data)
+    end
+    
+    output_results(results)
+  end
+  
+  private
+  
+  def parse_options(args)
+    OptionParser.new do |opts|
+      opts.banner = "Usage: pattern-analyzer [options]"
+      
+      opts.on("-i", "--input FILE", "Input file (JSON format from automata-generator)") do |file|
+        @options[:input_file] = file
+      end
+      
+      opts.on("-a", "--analysis TYPE", "Analysis type: all, basic, patterns, stability, clusters") do |type|
+        @options[:analysis_type] = type
+      end
+      
+      opts.on("-o", "--output-format FORMAT", "Output format: text, json, csv") do |format|
+        @options[:output_format] = format
+      end
+      
+      opts.on("--pattern-library FILE", "Load pattern library for recognition") do |file|
+        @options[:pattern_library] = file
+      end
+      
+      opts.on("-v", "--verbose", "Detailed logging") do
+        @options[:verbose] = true
+      end
+      
+      opts.on("-h", "--help", "Show this help message") do
+        puts opts
+        exit
+      end
+    end.parse!(args)
+  end
+  
+  def load_data(filename)
+    JSON.parse(File.read(filename))
+  end
+  
+  def analyze_basic_properties(data)
+    iterations = data.is_a?(Array) ? data : [data]
+    
+    analysis = {
+      total_iterations: iterations.length,
+      grid_dimensions: nil,
+      population_history: [],
+      density_history: [],
+      birth_death_rates: []
+    }
+    
+    prev_grid = nil
+    
+    iterations.each_with_index do |iter, i|
+      grid = iter['grid']
+      metadata = iter['metadata'] || {}
+      
+      analysis[:grid_dimensions] ||= "#{metadata['width']}x#{metadata['height']}"
+      
+      # Count living cells
+      living = count_living_cells(grid)
+      total = grid.length * grid[0].length
+      density = living.to_f / total
+      
+      analysis[:population_history] << living
+      analysis[:density_history] << density
+      
+      # Calculate birth/death rates
+      if prev_grid
+        births, deaths = calculate_changes(prev_grid, grid)
+        analysis[:birth_death_rates] << {
+          iteration: i,
+          births: births,
+          deaths: deaths,
+          net_change: births - deaths
+        }
+      end
+      
+      prev_grid = grid
+    end
+    
+    # Summary statistics
+    analysis[:summary] = {
+      initial_population: analysis[:population_history].first,
+      final_population: analysis[:population_history].last,
+      max_population: analysis[:population_history].max,
+      min_population: analysis[:population_history].min,
+      average_population: (analysis[:population_history].sum.to_f / analysis[:population_history].length).round(2),
+      population_stable: is_population_stable?(analysis[:population_history])
+    }
+    
+    analysis
+  end
+  
+  def analyze_patterns(data)
+    iterations = data.is_a?(Array) ? data : [data]
+    
+    analysis = {
+      still_lifes: [],
+      oscillators: [],
+      spaceships: [],
+      common_patterns: {}
+    }
+    
+    # Load pattern library if provided
+    patterns = load_pattern_library if @options[:pattern_library]
+    
+    iterations.each_with_index do |iter, i|
+      grid = iter['grid']
+      
+      # Find still lifes (blocks, beehives, etc.)
+      still_lifes = find_still_lifes(grid)
+      analysis[:still_lifes] << { iteration: i, count: still_lifes.length, patterns: still_lifes }
+      
+      # Detect common patterns
+      if patterns
+        detected = detect_known_patterns(grid, patterns)
+        detected.each do |pattern_name, locations|
+          analysis[:common_patterns][pattern_name] ||= []
+          analysis[:common_patterns][pattern_name] << { iteration: i, locations: locations }
+        end
+      end
+    end
+    
+    # Detect oscillators by comparing iterations
+    if iterations.length > 2
+      analysis[:oscillators] = detect_oscillators(iterations)
+    end
+    
+    # Detect spaceships (moving patterns)
+    if iterations.length > 4
+      analysis[:spaceships] = detect_spaceships(iterations)
+    end
+    
+    analysis
+  end
+  
+  def analyze_stability(data)
+    iterations = data.is_a?(Array) ? data : [data]
+    
+    analysis = {
+      reached_stability: false,
+      stability_iteration: nil,
+      pattern_period: nil,
+      final_state: nil
+    }
+    
+    # Check for exact repetition
+    grid_history = iterations.map { |iter| iter['grid'] }
+    
+    grid_history.each_with_index do |grid, i|
+      # Check against all previous states
+      (0...i).each do |j|
+        if grids_equal?(grid, grid_history[j])
+          analysis[:reached_stability] = true
+          analysis[:stability_iteration] = j
+          analysis[:pattern_period] = i - j
+          analysis[:final_state] = i == iterations.length - 1 ? 'periodic' : 'stabilized'
+          
+          puts "Pattern repeats with period #{i - j} starting at iteration #{j}" if @options[:verbose]
+          return analysis
+        end
+      end
+    end
+    
+    # Check if population is stable
+    population = iterations.map { |iter| count_living_cells(iter['grid']) }
+    if is_population_stable?(population)
+      analysis[:final_state] = 'population_stable'
+    else
+      analysis[:final_state] = 'chaotic'
+    end
+    
+    analysis
+  end
+  
+  def analyze_clusters(data)
+    iterations = data.is_a?(Array) ? data : [data]
+    
+    analysis = {
+      cluster_counts: [],
+      largest_clusters: [],
+      fragmentation: []
+    }
+    
+    iterations.each_with_index do |iter, i|
+      grid = iter['grid']
+      
+      # Find all connected components
+      clusters = find_clusters(grid)
+      
+      analysis[:cluster_counts] << {
+        iteration: i,
+        total_clusters: clusters.length,
+        sizes: clusters.map(&:length).sort.reverse
+      }
+      
+      if clusters.any?
+        largest = clusters.max_by(&:length)
+        analysis[:largest_clusters] << {
+          iteration: i,
+          size: largest.length,
+          density: calculate_cluster_density(largest, grid)
+        }
+      end
+      
+      # Fragmentation index
+      if clusters.length > 0
+        total_cells = count_living_cells(grid)
+        avg_cluster_size = total_cells.to_f / clusters.length
+        fragmentation = 1.0 - (avg_cluster_size / total_cells)
+        analysis[:fragmentation] << { iteration: i, index: fragmentation.round(3) }
+      end
+    end
+    
+    analysis
+  end
+  
+  def count_living_cells(grid)
+    grid.flatten.count { |cell| cell > 0 }
+  end
+  
+  def calculate_changes(prev_grid, grid)
+    births = 0
+    deaths = 0
+    
+    grid.each_with_index do |row, y|
+      row.each_with_index do |cell, x|
+        prev_cell = prev_grid[y][x]
+        
+        if cell > 0 && prev_cell == 0
+          births += 1
+        elsif cell == 0 && prev_cell > 0
+          deaths += 1
+        end
+      end
+    end
+    
+    [births, deaths]
+  end
+  
+  def is_population_stable?(population, window = 5)
+    return false if population.length < window
+    
+    last_values = population[-window..-1]
+    last_values.uniq.length == 1
+  end
+  
+  def find_still_lifes(grid)
+    still_lifes = []
+    
+    # Common 2x2 block pattern
+    (0..grid.length-2).each do |y|
+      (0..grid[0].length-2).each do |x|
+        if grid[y][x] > 0 && grid[y][x+1] > 0 &&
+           grid[y+1][x] > 0 && grid[y+1][x+1] > 0
+          still_lifes << { type: 'block', position: [x, y] }
+        end
+      end
+    end
+    
+    still_lifes
+  end
+  
+  def detect_oscillators(iterations)
+    oscillators = []
+    
+    # Look for patterns that repeat after N iterations
+    (2..5).each do |period|
+      next if iterations.length <= period
+      
+      positions = find_oscillating_positions(iterations, period)
+      if positions.any?
+        oscillators << {
+          period: period,
+          count: positions.length,
+          positions: positions.take(10)  # Limit output
+        }
+      end
+    end
+    
+    oscillators
+  end
+  
+  def find_oscillating_positions(iterations, period)
+    positions = []
+    
+    return positions if iterations.length <= period
+    
+    grid = iterations.last['grid']
+    grid_prev = iterations[-period-1]['grid']
+    
+    grid.each_with_index do |row, y|
+      row.each_with_index do |cell, x|
+        # Check if this position oscillates with the given period
+        matches = true
+        (1..period).each do |offset|
+          idx = iterations.length - 1 - offset
+          idx_prev = idx - period
+          
+          if idx_prev >= 0
+            if iterations[idx]['grid'][y][x] != iterations[idx_prev]['grid'][y][x]
+              matches = false
+              break
+            end
+          end
+        end
+        
+        positions << [x, y] if matches && has_activity?(iterations, x, y)
+      end
+    end
+    
+    positions
+  end
+  
+  def has_activity?(iterations, x, y)
+    values = iterations.map { |iter| iter['grid'][y][x] }
+    values.uniq.length > 1
+  end
+  
+  def detect_spaceships(iterations)
+    # Simple spaceship detection - patterns that move
+    []  # TODO: Implement spaceship detection
+  end
+  
+  def grids_equal?(grid1, grid2)
+    return false if grid1.length != grid2.length
+    return false if grid1[0].length != grid2[0].length
+    
+    grid1.each_with_index do |row, y|
+      row.each_with_index do |cell, x|
+        return false if cell != grid2[y][x]
+      end
+    end
+    
+    true
+  end
+  
+  def find_clusters(grid)
+    visited = Array.new(grid.length) { Array.new(grid[0].length, false) }
+    clusters = []
+    
+    grid.each_with_index do |row, y|
+      row.each_with_index do |cell, x|
+        if cell > 0 && !visited[y][x]
+          cluster = []
+          flood_fill(grid, visited, x, y, cluster)
+          clusters << cluster if cluster.any?
+        end
+      end
+    end
+    
+    clusters
+  end
+  
+  def flood_fill(grid, visited, x, y, cluster)
+    return if x < 0 || x >= grid[0].length || y < 0 || y >= grid.length
+    return if visited[y][x] || grid[y][x] == 0
+    
+    visited[y][x] = true
+    cluster << [x, y]
+    
+    # Check 8 neighbors
+    [[-1,-1], [0,-1], [1,-1], [-1,0], [1,0], [-1,1], [0,1], [1,1]].each do |dx, dy|
+      flood_fill(grid, visited, x + dx, y + dy, cluster)
+    end
+  end
+  
+  def calculate_cluster_density(cluster, grid)
+    return 0.0 if cluster.empty?
+    
+    min_x = cluster.map { |p| p[0] }.min
+    max_x = cluster.map { |p| p[0] }.max
+    min_y = cluster.map { |p| p[1] }.min
+    max_y = cluster.map { |p| p[1] }.max
+    
+    area = (max_x - min_x + 1) * (max_y - min_y + 1)
+    cluster.length.to_f / area
+  end
+  
+  def load_pattern_library
+    return {} unless @options[:pattern_library]
+    
+    if File.exist?(@options[:pattern_library])
+      YAML.load_file(@options[:pattern_library])
+    else
+      {}
+    end
+  end
+  
+  def detect_known_patterns(grid, patterns)
+    {}  # TODO: Implement pattern matching
+  end
+  
+  def output_results(results)
+    case @options[:output_format]
+    when 'json'
+      puts JSON.pretty_generate(results)
+    when 'csv'
+      output_csv(results)
+    else
+      output_text(results)
+    end
+  end
+  
+  def output_text(results)
+    puts "\n=== Cellular Automaton Analysis ==="
+    
+    if results[:basic]
+      puts "\n## Basic Properties"
+      puts "Grid size: #{results[:basic][:grid_dimensions]}"
+      puts "Total iterations: #{results[:basic][:total_iterations]}"
+      puts "\nPopulation Summary:"
+      summary = results[:basic][:summary]
+      puts "  Initial: #{summary[:initial_population]}"
+      puts "  Final: #{summary[:final_population]}"
+      puts "  Maximum: #{summary[:max_population]}"
+      puts "  Minimum: #{summary[:min_population]}"
+      puts "  Average: #{summary[:average_population]}"
+      puts "  Stable: #{summary[:population_stable] ? 'Yes' : 'No'}"
+    end
+    
+    if results[:stability]
+      puts "\n## Stability Analysis"
+      stab = results[:stability]
+      puts "Reached stability: #{stab[:reached_stability] ? 'Yes' : 'No'}"
+      if stab[:reached_stability]
+        puts "Stability iteration: #{stab[:stability_iteration]}"
+        puts "Pattern period: #{stab[:pattern_period]}"
+      end
+      puts "Final state: #{stab[:final_state]}"
+    end
+    
+    if results[:patterns]
+      puts "\n## Pattern Analysis"
+      patterns = results[:patterns]
+      
+      if patterns[:still_lifes].any?
+        total_still = patterns[:still_lifes].last[:count]
+        puts "Still lifes found: #{total_still}"
+      end
+      
+      if patterns[:oscillators].any?
+        puts "\nOscillators:"
+        patterns[:oscillators].each do |osc|
+          puts "  Period #{osc[:period]}: #{osc[:count]} found"
+        end
+      end
+      
+      if patterns[:common_patterns].any?
+        puts "\nKnown patterns detected:"
+        patterns[:common_patterns].each do |name, detections|
+          puts "  #{name}: #{detections.length} instances"
+        end
+      end
+    end
+    
+    if results[:clusters]
+      puts "\n## Cluster Analysis"
+      clusters = results[:clusters]
+      
+      if clusters[:cluster_counts].any?
+        final = clusters[:cluster_counts].last
+        puts "Final cluster count: #{final[:total_clusters]}"
+        puts "Largest cluster size: #{final[:sizes].first || 0}"
+        
+        if clusters[:fragmentation].any?
+          frag = clusters[:fragmentation].last[:index]
+          puts "Fragmentation index: #{frag}"
+        end
+      end
+    end
+  end
+  
+  def output_csv(results)
+    require 'csv'
+    
+    puts "iteration,population,clusters,largest_cluster,fragmentation"
+    
+    basic = results[:basic] || {}
+    clusters = results[:clusters] || {}
+    
+    max_iter = basic[:population_history]&.length || 0
+    
+    max_iter.times do |i|
+      row = [i]
+      row << (basic[:population_history][i] rescue "")
+      row << (clusters[:cluster_counts][i][:total_clusters] rescue "")
+      row << (clusters[:largest_clusters][i][:size] rescue "")
+      row << (clusters[:fragmentation][i][:index] rescue "")
+      
+      puts row.join(",")
+    end
+  end
+end
+
+# Run the analyzer
+PatternAnalyzer.new.run(ARGV)

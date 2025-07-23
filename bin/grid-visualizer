@@ -1,0 +1,349 @@
+#!/usr/bin/env ruby
+
+require 'optparse'
+require 'yaml'
+require 'json'
+
+class GridVisualizer
+  def initialize
+    @options = {
+      input_file: nil,
+      output_format: 'png',
+      output_dir: 'output/images',
+      cell_size: 10,
+      color_scheme: 'classic',
+      quality: 'standard',
+      verbose: false
+    }
+    
+    @config = load_configurations
+  end
+  
+  def run(args)
+    parse_options(args)
+    
+    unless @options[:input_file]
+      puts "Error: Input file required (use --input FILE)"
+      exit 1
+    end
+    
+    puts "Loading grid data from #{@options[:input_file]}..." if @options[:verbose]
+    grid_data = load_grid_data(@options[:input_file])
+    
+    case @options[:output_format]
+    when 'png'
+      visualize_as_png(grid_data)
+    when 'svg'
+      visualize_as_svg(grid_data)
+    when 'ascii'
+      visualize_as_ascii(grid_data)
+    when 'html'
+      visualize_as_html(grid_data)
+    else
+      puts "Error: Unknown output format '#{@options[:output_format]}'"
+      exit 1
+    end
+  end
+  
+  private
+  
+  def parse_options(args)
+    OptionParser.new do |opts|
+      opts.banner = "Usage: grid-visualizer [options]"
+      
+      opts.on("-i", "--input FILE", "Input file (JSON or CSV)") do |file|
+        @options[:input_file] = file
+      end
+      
+      opts.on("-f", "--output-format FORMAT", "Output format: png, svg, ascii, html") do |format|
+        @options[:output_format] = format
+      end
+      
+      opts.on("-o", "--output-dir DIR", "Output directory") do |dir|
+        @options[:output_dir] = dir
+      end
+      
+      opts.on("-s", "--cell-size SIZE", Integer, "Cell size in pixels") do |size|
+        @options[:cell_size] = size
+      end
+      
+      opts.on("-c", "--color-scheme SCHEME", "Color scheme: classic, terrain, heatmap, d&d") do |scheme|
+        @options[:color_scheme] = scheme
+      end
+      
+      opts.on("-q", "--quality PRESET", "Quality preset: draft, standard, high") do |quality|
+        @options[:quality] = quality
+      end
+      
+      opts.on("--show-grid", "Show grid lines") do
+        @options[:show_grid] = true
+      end
+      
+      opts.on("--iteration N", Integer, "Visualize specific iteration") do |n|
+        @options[:iteration] = n
+      end
+      
+      opts.on("-v", "--verbose", "Detailed logging") do
+        @options[:verbose] = true
+      end
+      
+      opts.on("-h", "--help", "Show this help message") do
+        puts opts
+        exit
+      end
+    end.parse!(args)
+  end
+  
+  def load_configurations
+    {
+      'export' => YAML.load_file(File.expand_path('../config/export.yml', __dir__))
+    }
+  end
+  
+  def load_grid_data(filename)
+    ext = File.extname(filename).downcase
+    
+    case ext
+    when '.json'
+      data = JSON.parse(File.read(filename))
+      # Handle both single state and multiple iterations
+      if data.is_a?(Array)
+        @options[:iteration] ? data[@options[:iteration]] : data
+      else
+        data
+      end
+    when '.csv'
+      require 'csv'
+      grid = CSV.read(filename).map { |row| row.map(&:to_i) }
+      { 'grid' => grid, 'metadata' => { 'width' => grid[0].length, 'height' => grid.length } }
+    else
+      puts "Error: Unsupported file format '#{ext}'"
+      exit 1
+    end
+  end
+  
+  def visualize_as_png(grid_data)
+    begin
+      require 'rmagick'
+      include Magick
+    rescue LoadError
+      puts "Error: RMagick not installed. Run 'bundle install' or use --output-format ascii"
+      exit 1
+    end
+    
+    ensure_output_directory
+    
+    grids = grid_data.is_a?(Array) ? grid_data : [grid_data]
+    
+    grids.each_with_index do |data, index|
+      grid = data['grid']
+      metadata = data['metadata'] || {}
+      
+      height = grid.length
+      width = grid[0].length
+      
+      # Get quality settings
+      quality = @config['export']['quality_presets'][@options[:quality]]
+      cell_size = quality ? quality['image']['cell_size'] : @options[:cell_size]
+      border_width = quality ? quality['image']['border_width'] : 1
+      
+      # Create image
+      img_width = width * cell_size
+      img_height = height * cell_size
+      
+      image = Image.new(img_width, img_height) do |img|
+        img.background_color = 'white'
+      end
+      
+      gc = Draw.new
+      
+      # Get colors
+      colors = get_color_palette
+      
+      # Draw cells
+      grid.each_with_index do |row, y|
+        row.each_with_index do |cell, x|
+          color = colors[cell] || colors['default'] || 'gray'
+          
+          gc.fill(color)
+          gc.stroke(@options[:show_grid] ? 'gray' : 'none')
+          gc.stroke_width(border_width) if @options[:show_grid]
+          
+          gc.rectangle(
+            x * cell_size,
+            y * cell_size,
+            (x + 1) * cell_size - 1,
+            (y + 1) * cell_size - 1
+          )
+        end
+      end
+      
+      gc.draw(image)
+      
+      # Save image
+      timestamp = Time.now.strftime("%Y%m%d_%H%M%S")
+      iteration_suffix = grids.length > 1 ? "_iter#{data['iteration'] || index}" : ""
+      filename = File.join(@options[:output_dir], "grid_#{timestamp}#{iteration_suffix}.png")
+      
+      image.write(filename)
+      puts "Saved visualization to: #{filename}"
+    end
+  end
+  
+  def visualize_as_svg(grid_data)
+    ensure_output_directory
+    
+    grids = grid_data.is_a?(Array) ? grid_data : [grid_data]
+    
+    grids.each_with_index do |data, index|
+      grid = data['grid']
+      
+      height = grid.length
+      width = grid[0].length
+      cell_size = @options[:cell_size]
+      
+      svg_width = width * cell_size
+      svg_height = height * cell_size
+      
+      colors = get_color_palette
+      
+      svg = []
+      svg << %Q{<?xml version="1.0" encoding="UTF-8"?>}
+      svg << %Q{<svg width="#{svg_width}" height="#{svg_height}" xmlns="http://www.w3.org/2000/svg">}
+      
+      # Draw cells
+      grid.each_with_index do |row, y|
+        row.each_with_index do |cell, x|
+          color = colors[cell] || colors['default'] || '#808080'
+          
+          rect_attrs = [
+            %Q{x="#{x * cell_size}"},
+            %Q{y="#{y * cell_size}"},
+            %Q{width="#{cell_size}"},
+            %Q{height="#{cell_size}"},
+            %Q{fill="#{color}"}
+          ]
+          
+          if @options[:show_grid]
+            rect_attrs << %Q{stroke="#333333"}
+            rect_attrs << %Q{stroke-width="0.5"}
+          end
+          
+          svg << %Q{  <rect #{rect_attrs.join(' ')} />}
+        end
+      end
+      
+      svg << "</svg>"
+      
+      # Save SVG
+      timestamp = Time.now.strftime("%Y%m%d_%H%M%S")
+      iteration_suffix = grids.length > 1 ? "_iter#{data['iteration'] || index}" : ""
+      filename = File.join(@options[:output_dir], "grid_#{timestamp}#{iteration_suffix}.svg")
+      
+      File.write(filename, svg.join("\n"))
+      puts "Saved visualization to: #{filename}"
+    end
+  end
+  
+  def visualize_as_ascii(grid_data)
+    chars = @config['export']['image_formats']['ascii']['characters']
+    
+    grids = grid_data.is_a?(Array) ? grid_data : [grid_data]
+    
+    grids.each_with_index do |data, index|
+      grid = data['grid']
+      metadata = data['metadata'] || {}
+      
+      puts "\nIteration: #{data['iteration'] || index}" if grids.length > 1
+      puts "Size: #{grid[0].length}x#{grid.length}"
+      puts "-" * 80
+      
+      grid.each do |row|
+        line = row.map do |cell|
+          case cell
+          when 0 then chars['dead'] || ' '
+          when 1 then chars['alive'] || '#'
+          when 2 then chars['water'] || '~'
+          when 3 then chars['mountain'] || '^'
+          when 4 then chars['forest'] || '*'
+          when 5 then chars['settlement'] || '@'
+          else chars['alive'] || '#'
+          end
+        end.join
+        puts line
+      end
+      puts "-" * 80
+    end
+  end
+  
+  def visualize_as_html(grid_data)
+    ensure_output_directory
+    
+    grids = grid_data.is_a?(Array) ? grid_data : [grid_data]
+    colors = get_color_palette
+    
+    html = []
+    html << "<!DOCTYPE html>"
+    html << "<html><head>"
+    html << "<title>Grid Visualization</title>"
+    html << "<style>"
+    html << "  body { font-family: monospace; margin: 20px; }"
+    html << "  .grid { display: inline-block; border: 1px solid #ccc; }"
+    html << "  .row { height: #{@options[:cell_size]}px; }"
+    html << "  .cell { display: inline-block; width: #{@options[:cell_size]}px; height: #{@options[:cell_size]}px; }"
+    
+    # Add color styles
+    colors.each do |state, color|
+      html << "  .cell-#{state} { background-color: #{color}; }"
+    end
+    
+    html << "</style></head><body>"
+    
+    grids.each_with_index do |data, index|
+      grid = data['grid']
+      
+      html << "<h2>Iteration #{data['iteration'] || index}</h2>" if grids.length > 1
+      html << "<div class='grid'>"
+      
+      grid.each do |row|
+        html << "<div class='row'>"
+        row.each do |cell|
+          html << "<span class='cell cell-#{cell}'></span>"
+        end
+        html << "</div>"
+      end
+      
+      html << "</div>"
+    end
+    
+    html << "</body></html>"
+    
+    # Save HTML
+    timestamp = Time.now.strftime("%Y%m%d_%H%M%S")
+    filename = File.join(@options[:output_dir], "grid_#{timestamp}.html")
+    
+    File.write(filename, html.join("\n"))
+    puts "Saved visualization to: #{filename}"
+  end
+  
+  def get_color_palette
+    scheme = @config['export']['color_schemes'][@options[:color_scheme]]
+    
+    return scheme if scheme
+    
+    # Default classic scheme
+    {
+      0 => '#FFFFFF',
+      1 => '#000000',
+      'default' => '#808080'
+    }
+  end
+  
+  def ensure_output_directory
+    require 'fileutils'
+    FileUtils.mkdir_p(@options[:output_dir])
+  end
+end
+
+# Run the visualizer
+GridVisualizer.new.run(ARGV)

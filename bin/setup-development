@@ -1,0 +1,209 @@
+#!/usr/bin/env ruby
+
+require 'fileutils'
+require 'yaml'
+
+class DevelopmentSetup
+  def initialize
+    @errors = []
+    @warnings = []
+  end
+  
+  def run
+    puts "=== Cellular Automata Engine Development Setup ==="
+    puts
+    
+    check_ruby_version
+    install_dependencies
+    create_directories
+    setup_git_hooks
+    create_local_config
+    run_initial_tests
+    
+    print_summary
+  end
+  
+  private
+  
+  def check_ruby_version
+    print "Checking Ruby version... "
+    
+    required_version = File.read('.ruby-version').strip
+    current_version = RUBY_VERSION
+    
+    if Gem::Version.new(current_version) >= Gem::Version.new(required_version)
+      puts "✓ (#{current_version})"
+    else
+      puts "✗"
+      @errors << "Ruby #{required_version} or higher required (current: #{current_version})"
+    end
+  rescue => e
+    puts "✗"
+    @errors << "Could not check Ruby version: #{e.message}"
+  end
+  
+  def install_dependencies
+    print "Installing dependencies... "
+    
+    unless system('bundle install --quiet')
+      puts "✗"
+      @errors << "Failed to install dependencies. Run 'bundle install' manually."
+      return
+    end
+    
+    puts "✓"
+    
+    # Check for optional dependencies
+    check_optional_dependency('rmagick', 'Image generation')
+    check_optional_dependency('chunky_png', 'PNG export (fallback)')
+  end
+  
+  def check_optional_dependency(gem_name, purpose)
+    require gem_name
+    puts "  ✓ #{gem_name} installed (#{purpose})"
+  rescue LoadError
+    @warnings << "#{gem_name} not installed - #{purpose} may not work"
+    puts "  ⚠ #{gem_name} not available (#{purpose})"
+  end
+  
+  def create_directories
+    print "Creating directory structure... "
+    
+    directories = [
+      'output',
+      'output/automata',
+      'output/images',
+      'output/data',
+      'output/animations',
+      'output/maps',
+      'output/export',
+      'tmp',
+      'log'
+    ]
+    
+    directories.each do |dir|
+      FileUtils.mkdir_p(dir)
+    end
+    
+    # Create .gitignore for output directories
+    File.write('output/.gitignore', "*\n!.gitignore\n") unless File.exist?('output/.gitignore')
+    File.write('tmp/.gitignore', "*\n!.gitignore\n") unless File.exist?('tmp/.gitignore')
+    File.write('log/.gitignore', "*\n!.gitignore\n") unless File.exist?('log/.gitignore')
+    
+    puts "✓"
+  end
+  
+  def setup_git_hooks
+    print "Setting up git hooks... "
+    
+    hooks_dir = '.git/hooks'
+    
+    unless Dir.exist?('.git')
+      puts "⚠ (not a git repository)"
+      @warnings << "Git hooks not installed - not a git repository"
+      return
+    end
+    
+    # Create pre-commit hook
+    pre_commit = <<~HOOK
+      #!/bin/sh
+      # Run tests before commit
+      echo "Running tests..."
+      ./bin/test-runner --format progress --fail-fast
+      
+      if [ $? -ne 0 ]; then
+        echo "Tests failed. Commit aborted."
+        exit 1
+      fi
+      
+      # Run linter
+      if command -v rubocop >/dev/null 2>&1; then
+        echo "Running RuboCop..."
+        bundle exec rubocop --auto-correct
+      fi
+    HOOK
+    
+    File.write("#{hooks_dir}/pre-commit", pre_commit)
+    FileUtils.chmod(0755, "#{hooks_dir}/pre-commit")
+    
+    puts "✓"
+  rescue => e
+    puts "✗"
+    @warnings << "Could not set up git hooks: #{e.message}"
+  end
+  
+  def create_local_config
+    print "Creating local configuration... "
+    
+    local_config_file = 'config/local.yml'
+    
+    if File.exist?(local_config_file)
+      puts "✓ (already exists)"
+      return
+    end
+    
+    local_config = {
+      'development' => {
+        'verbose' => true,
+        'default_output_dir' => 'output',
+        'performance' => {
+          'parallel_processing' => true,
+          'worker_threads' => 4
+        }
+      }
+    }
+    
+    File.write(local_config_file, YAML.dump(local_config))
+    
+    # Add to .gitignore
+    gitignore = File.read('.gitignore') rescue ''
+    unless gitignore.include?('config/local.yml')
+      File.open('.gitignore', 'a') { |f| f.puts "\n# Local configuration\nconfig/local.yml" }
+    end
+    
+    puts "✓"
+  end
+  
+  def run_initial_tests
+    print "Running initial test suite... "
+    
+    if system('./bin/test-runner --format progress > /dev/null 2>&1')
+      puts "✓"
+    else
+      puts "⚠"
+      @warnings << "Some tests are failing. Run './bin/test-runner' to see details."
+    end
+  end
+  
+  def print_summary
+    puts
+    puts "=== Setup Summary ==="
+    
+    if @errors.empty? && @warnings.empty?
+      puts "✅ Development environment ready!"
+      puts
+      puts "Next steps:"
+      puts "  1. Run './bin/automata-generator --help' to see available options"
+      puts "  2. Try: ./bin/automata-generator --rules conway --iterations 50"
+      puts "  3. Visualize: ./bin/grid-visualizer --input output/automata/*.json"
+      puts "  4. Run tests: ./bin/test-runner"
+    else
+      if @errors.any?
+        puts "\n❌ Errors:"
+        @errors.each { |error| puts "   - #{error}" }
+      end
+      
+      if @warnings.any?
+        puts "\n⚠️  Warnings:"
+        @warnings.each { |warning| puts "   - #{warning}" }
+      end
+      
+      puts "\nPlease fix any errors before continuing."
+    end
+    
+    puts
+  end
+end
+
+# Run setup
+DevelopmentSetup.new.run

@@ -1,5 +1,7 @@
 #!/usr/bin/env ruby
 
+require 'optparse'
+require 'yaml'
 require_relative '../lib/automata/grid/base_grid'
 
 # Square Grid implementation
@@ -52,59 +54,114 @@ class TerrainGenerator
   }
 
   def initialize
-    @width = 80
-    @height = 40
-    @terrain_type = 'cave'
-    @iterations = 5
-    @density = 0.45
-    @output_file = nil
+    @options = {
+      grid_size: '80x40',
+      grid_type: 'square',
+      rules: 'cave',
+      iterations: 5,
+      output_format: 'ascii',
+      density: 0.45,
+      output_file: nil,
+      verbose: false
+    }
+    
+    @config = load_configurations
   end
 
   def run(args)
     parse_options(args)
-    
-    if args.include?('--help') || args.include?('-h')
-      show_help
-      return
-    end
-
     generate_terrain
   end
 
   private
+  
+  def load_configurations
+    {
+      'automata' => YAML.load_file(File.expand_path('../config/automata.yml', __dir__)),
+      'grids' => YAML.load_file(File.expand_path('../config/grids.yml', __dir__))
+    }
+  rescue => e
+    puts "Warning: Could not load configuration files: #{e.message}"
+    {}
+  end
 
   def parse_options(args)
-    args.each_with_index do |arg, i|
-      case arg
-      when '--size'
-        size = args[i + 1]
-        @width, @height = size.split('x').map(&:to_i) if size
-      when '--terrain'
-        @terrain_type = args[i + 1] if args[i + 1]
-      when '--iterations'
-        @iterations = args[i + 1].to_i if args[i + 1]
-      when '--density'
-        @density = args[i + 1].to_f if args[i + 1]
-      when '--output'
-        @output_file = args[i + 1] if args[i + 1]
+    OptionParser.new do |opts|
+      opts.banner = "Usage: terrain-generator [options]"
+      
+      opts.on("--grid-size SIZE", "Grid dimensions (e.g., 100x100)") do |size|
+        @options[:grid_size] = size
       end
-    end
+      
+      opts.on("--grid-type TYPE", "Grid type: square, hexagonal") do |type|
+        @options[:grid_type] = type
+      end
+      
+      opts.on("--rules RULESET", "Rule set: cave, conway, forest, custom") do |rules|
+        @options[:rules] = rules
+      end
+      
+      opts.on("--terrain TYPE", "Terrain type (legacy alias for --rules)") do |type|
+        @options[:rules] = type
+      end
+      
+      opts.on("--iterations COUNT", Integer, "Number of simulation steps") do |count|
+        @options[:iterations] = count
+      end
+      
+      opts.on("--output-format FORMAT", "Output format: png, svg, json, ascii") do |format|
+        @options[:output_format] = format
+      end
+      
+      opts.on("--density FLOAT", Float, "Initial density 0.0-1.0") do |density|
+        @options[:density] = density.clamp(0.0, 1.0)
+      end
+      
+      opts.on("--output FILE", "Save result to file") do |file|
+        @options[:output_file] = file
+      end
+      
+      opts.on("-v", "--verbose", "Detailed logging") do
+        @options[:verbose] = true
+      end
+      
+      opts.on("-h", "--help", "Usage information") do
+        puts opts
+        puts "\nTERRAIN TYPES:"
+        TERRAIN_TYPES.each do |type, config|
+          puts "  #{type.ljust(10)} #{config[:name]}"
+        end
+        puts "\nEXAMPLES:"
+        puts "  terrain-generator --rules cave --grid-size 60x30"
+        puts "  terrain-generator --rules forest --iterations 3 --output forest-map.txt"
+        puts "  terrain-generator --rules mountain --density 0.3"
+        exit
+      end
+    end.parse!(args)
+    
+    # Parse grid size
+    @width, @height = @options[:grid_size].split('x').map(&:to_i)
+  rescue => e
+    puts "Error parsing options: #{e.message}"
+    exit 1
   end
 
   def generate_terrain
-    terrain_config = TERRAIN_TYPES[@terrain_type] || TERRAIN_TYPES['cave']
+    terrain_config = TERRAIN_TYPES[@options[:rules]] || TERRAIN_TYPES['cave']
     
-    puts "🗺️  Generating #{terrain_config[:name]} (#{@width}x#{@height})"
-    puts "⚙️  Iterations: #{@iterations}, Density: #{@density}"
-    puts "=" * 60
+    if @options[:verbose]
+      puts "Generating #{terrain_config[:name]} (#{@width}x#{@height})"
+      puts "Iterations: #{@options[:iterations]}, Density: #{@options[:density]}"
+      puts "=" * 60
+    end
     
     # Create and initialize grid
     grid = SquareGrid.new(@width, @height)
-    grid.randomize(density: @density)
+    grid.randomize(density: @options[:density])
     
     # Apply cellular automata rules
-    @iterations.times do |i|
-      puts "🔄 Iteration #{i + 1}/#{@iterations}" if @iterations > 3
+    @options[:iterations].times do |i|
+      puts "Iteration #{i + 1}/#{@options[:iterations]}" if @options[:verbose] && @options[:iterations] > 3
       grid = apply_rules(grid)
     end
     
@@ -113,14 +170,14 @@ class TerrainGenerator
     show_stats(grid)
     
     # Save to file if requested
-    save_to_file(grid, terrain_config) if @output_file
+    save_to_file(grid, terrain_config) if @options[:output_file]
   end
 
   def apply_rules(grid)
     new_grid = grid.clone
     
     grid.each_cell do |x, y, _|
-      new_value = case @terrain_type
+      new_value = case @options[:rules]
                   when 'cave'
                     CaveRules.apply(grid, x, y)
                   else
@@ -133,7 +190,7 @@ class TerrainGenerator
   end
 
   def display_terrain(grid, config)
-    puts "\n🗺️  Generated Terrain:"
+    puts "\nGenerated Terrain:"
     puts "-" * (@width + 2)
     
     grid.to_a.each do |row|
@@ -153,16 +210,18 @@ class TerrainGenerator
 
   def show_stats(grid)
     stats = grid.stats
-    puts "\n📊 Terrain Statistics:"
-    puts "   Size: #{stats[:width]}x#{stats[:height]}"
-    puts "   Active cells: #{stats[:active_cells]}"
-    puts "   Density: #{(stats[:density] * 100).round(1)}%"
-    puts "   Generation: #{stats[:generation]}"
+    if @options[:verbose]
+      puts "\nTerrain Statistics:"
+      puts "   Size: #{stats[:width]}x#{stats[:height]}"
+      puts "   Active cells: #{stats[:active_cells]}"
+      puts "   Density: #{(stats[:density] * 100).round(1)}%"
+      puts "   Generation: #{stats[:generation]}"
+    end
   end
 
   def save_to_file(grid, config)
     content = "# Generated #{config[:name]}\n"
-    content += "# Size: #{@width}x#{@height}, Iterations: #{@iterations}\n\n"
+    content += "# Size: #{@width}x#{@height}, Iterations: #{@options[:iterations]}\n\n"
     
     grid.to_a.each do |row|
       row.each do |cell|
@@ -171,34 +230,11 @@ class TerrainGenerator
       content += "\n"
     end
     
-    File.write(@output_file, content)
-    puts "💾 Saved to: #{@output_file}"
+    File.write(@options[:output_file], content)
+    puts "Saved to: #{@options[:output_file]}"
   end
 
-  def show_help
-    puts "terrain-generator - Generate D&D terrain maps using cellular automata"
-    puts ""
-    puts "USAGE:"
-    puts "  ./bin/terrain-generator [OPTIONS]"
-    puts ""
-    puts "OPTIONS:"
-    puts "  --size WIDTHxHEIGHT    Grid size (default: 80x40)"
-    puts "  --terrain TYPE         Terrain type (default: cave)"
-    puts "  --iterations N         Number of CA iterations (default: 5)"
-    puts "  --density FLOAT        Initial density 0.0-1.0 (default: 0.45)"
-    puts "  --output FILE          Save result to file"
-    puts "  --help, -h             Show this help"
-    puts ""
-    puts "TERRAIN TYPES:"
-    TERRAIN_TYPES.each do |type, config|
-      puts "  #{type.ljust(10)} #{config[:name]}"
-    end
-    puts ""
-    puts "EXAMPLES:"
-    puts "  ./bin/terrain-generator --terrain cave --size 60x30"
-    puts "  ./bin/terrain-generator --terrain forest --iterations 3 --output forest-map.txt"
-    puts "  ./bin/terrain-generator --terrain mountain --density 0.3"
-  end
+  # Help is now handled by OptionParser
 end
 
 if __FILE__ == $0

@@ -1,0 +1,479 @@
+#!/usr/bin/env ruby
+
+require 'optparse'
+require 'json'
+require 'yaml'
+require 'fileutils'
+
+class ExportEngine
+  def initialize
+    @options = {
+      input_files: [],
+      output_format: 'all',
+      output_dir: 'output/export',
+      verbose: false,
+      batch_mode: false
+    }
+    
+    @config = load_configurations
+  end
+  
+  def run(args)
+    parse_options(args)
+    
+    if @options[:input_files].empty?
+      puts "Error: At least one input file required (use --input FILE)"
+      exit 1
+    end
+    
+    ensure_output_structure
+    
+    @options[:input_files].each do |input_file|
+      puts "Processing #{input_file}..." if @options[:verbose]
+      export_file(input_file)
+    end
+    
+    generate_index if @options[:batch_mode]
+    
+    puts "Export complete! Files saved to: #{@options[:output_dir]}"
+  end
+  
+  private
+  
+  def parse_options(args)
+    OptionParser.new do |opts|
+      opts.banner = "Usage: export-engine [options]"
+      
+      opts.on("-i", "--input FILE", "Input file (can be specified multiple times)") do |file|
+        @options[:input_files] << file
+      end
+      
+      opts.on("-f", "--format FORMAT", "Export format: all, web, print, data, animation") do |format|
+        @options[:output_format] = format
+      end
+      
+      opts.on("-o", "--output-dir DIR", "Output directory") do |dir|
+        @options[:output_dir] = dir
+      end
+      
+      opts.on("--batch", "Batch mode - process multiple files") do
+        @options[:batch_mode] = true
+      end
+      
+      opts.on("--compress", "Compress output files") do
+        @options[:compress] = true
+      end
+      
+      opts.on("--metadata", "Include detailed metadata") do
+        @options[:include_metadata] = true
+      end
+      
+      opts.on("-v", "--verbose", "Detailed logging") do
+        @options[:verbose] = true
+      end
+      
+      opts.on("-h", "--help", "Show this help message") do
+        puts opts
+        exit
+      end
+    end.parse!(args)
+  end
+  
+  def load_configurations
+    {
+      'export' => YAML.load_file(File.expand_path('../config/export.yml', __dir__))
+    }
+  end
+  
+  def ensure_output_structure
+    base = @options[:output_dir]
+    subdirs = @config['export']['output']['subdirectories']
+    
+    FileUtils.mkdir_p(base)
+    subdirs.each do |_key, dir|
+      FileUtils.mkdir_p(File.join(base, dir))
+    end
+  end
+  
+  def export_file(input_file)
+    data = load_input_data(input_file)
+    basename = File.basename(input_file, '.*')
+    
+    case @options[:output_format]
+    when 'all'
+      export_all_formats(data, basename)
+    when 'web'
+      export_web_formats(data, basename)
+    when 'print'
+      export_print_formats(data, basename)
+    when 'data'
+      export_data_formats(data, basename)
+    when 'animation'
+      export_animation_formats(data, basename)
+    else
+      puts "Unknown format: #{@options[:output_format]}"
+    end
+  end
+  
+  def load_input_data(filename)
+    case File.extname(filename).downcase
+    when '.json'
+      JSON.parse(File.read(filename))
+    when '.yml', '.yaml'
+      YAML.load_file(filename)
+    else
+      puts "Error: Unsupported input format for #{filename}"
+      exit 1
+    end
+  end
+  
+  def export_all_formats(data, basename)
+    export_web_formats(data, basename)
+    export_print_formats(data, basename)
+    export_data_formats(data, basename)
+    export_animation_formats(data, basename) if data.is_a?(Array)
+  end
+  
+  def export_web_formats(data, basename)
+    # Interactive HTML viewer
+    export_html_viewer(data, basename)
+    
+    # Web-optimized images
+    export_web_images(data, basename)
+    
+    # JSON for web consumption
+    export_web_json(data, basename)
+  end
+  
+  def export_print_formats(data, basename)
+    # High-resolution PNG
+    export_print_png(data, basename)
+    
+    # Vector SVG
+    export_print_svg(data, basename)
+    
+    # PDF (if supported)
+    export_pdf(data, basename) if pdf_available?
+  end
+  
+  def export_data_formats(data, basename)
+    # Scientific formats
+    export_csv_data(data, basename)
+    export_numpy_format(data, basename)
+    export_matlab_format(data, basename)
+  end
+  
+  def export_animation_formats(data, basename)
+    return unless data.is_a?(Array) && data.length > 1
+    
+    # Animated GIF
+    export_animated_gif(data, basename)
+    
+    # Video formats
+    export_mp4_video(data, basename) if ffmpeg_available?
+  end
+  
+  def export_html_viewer(data, basename)
+    iterations = data.is_a?(Array) ? data : [data]
+    
+    html = generate_html_template
+    html.sub!('{{TITLE}}', "Cellular Automaton: #{basename}")
+    html.sub!('{{DATA}}', iterations.to_json)
+    
+    filename = File.join(@options[:output_dir], 'images', "#{basename}_viewer.html")
+    File.write(filename, html)
+    
+    puts "  Created HTML viewer: #{filename}" if @options[:verbose]
+  end
+  
+  def generate_html_template
+    <<~HTML
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>{{TITLE}}</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          #controls { margin-bottom: 20px; }
+          #grid { border: 1px solid #ccc; margin: 20px 0; }
+          .cell { display: inline-block; width: 5px; height: 5px; }
+          .cell-0 { background: white; }
+          .cell-1 { background: black; }
+          .info { margin-top: 20px; }
+          button { margin: 0 5px; padding: 5px 15px; }
+        </style>
+      </head>
+      <body>
+        <h1>{{TITLE}}</h1>
+        <div id="controls">
+          <button onclick="play()">Play</button>
+          <button onclick="pause()">Pause</button>
+          <button onclick="reset()">Reset</button>
+          <button onclick="step()">Step</button>
+          <label>Speed: <input type="range" id="speed" min="1" max="10" value="5"></label>
+        </div>
+        <div id="grid"></div>
+        <div class="info">
+          <p>Iteration: <span id="iteration">0</span></p>
+          <p>Living cells: <span id="population">0</span></p>
+        </div>
+        
+        <script>
+          const data = {{DATA}};
+          let currentIteration = 0;
+          let playing = false;
+          let playInterval = null;
+          
+          function render() {
+            const grid = document.getElementById('grid');
+            const current = data[currentIteration];
+            const gridData = current.grid || current;
+            
+            grid.innerHTML = '';
+            gridData.forEach(row => {
+              const rowDiv = document.createElement('div');
+              rowDiv.style.height = '5px';
+              row.forEach(cell => {
+                const cellSpan = document.createElement('span');
+                cellSpan.className = 'cell cell-' + cell;
+                rowDiv.appendChild(cellSpan);
+              });
+              grid.appendChild(rowDiv);
+            });
+            
+            document.getElementById('iteration').textContent = current.iteration || currentIteration;
+            document.getElementById('population').textContent = 
+              current.metadata ? current.metadata.living_cells : countLiving(gridData);
+          }
+          
+          function countLiving(grid) {
+            return grid.flat().filter(cell => cell > 0).length;
+          }
+          
+          function play() {
+            if (!playing) {
+              playing = true;
+              const speed = document.getElementById('speed').value;
+              playInterval = setInterval(() => {
+                step();
+                if (currentIteration >= data.length - 1) {
+                  pause();
+                }
+              }, 1000 / speed);
+            }
+          }
+          
+          function pause() {
+            playing = false;
+            if (playInterval) {
+              clearInterval(playInterval);
+              playInterval = null;
+            }
+          }
+          
+          function reset() {
+            pause();
+            currentIteration = 0;
+            render();
+          }
+          
+          function step() {
+            if (currentIteration < data.length - 1) {
+              currentIteration++;
+              render();
+            }
+          }
+          
+          // Initial render
+          render();
+        </script>
+      </body>
+      </html>
+    HTML
+  end
+  
+  def export_web_images(data, basename)
+    # Create thumbnail and full-size versions
+    # This would use the grid-visualizer tool
+    system("#{File.expand_path('../grid-visualizer', __dir__)} " \
+           "--input #{@options[:input_files].first} " \
+           "--output-dir #{File.join(@options[:output_dir], 'images')} " \
+           "--output-format png --quality draft")
+  end
+  
+  def export_web_json(data, basename)
+    # Optimize JSON for web
+    iterations = data.is_a?(Array) ? data : [data]
+    
+    web_data = {
+      metadata: {
+        type: 'cellular_automaton',
+        name: basename,
+        created: Time.now.iso8601,
+        iterations: iterations.length
+      },
+      data: iterations.map do |iter|
+        {
+          i: iter['iteration'],
+          g: compress_grid(iter['grid']),
+          p: iter['metadata'] ? iter['metadata']['living_cells'] : nil
+        }
+      end
+    }
+    
+    filename = File.join(@options[:output_dir], 'data', "#{basename}_web.json")
+    File.write(filename, web_data.to_json)
+    
+    if @options[:compress]
+      system("gzip -k #{filename}")
+    end
+  end
+  
+  def compress_grid(grid)
+    # Simple RLE compression for sparse grids
+    grid.map do |row|
+      compress_row(row)
+    end
+  end
+  
+  def compress_row(row)
+    # Convert to string for better compression
+    row.join('')
+  end
+  
+  def export_print_png(data, basename)
+    system("#{File.expand_path('../grid-visualizer', __dir__)} " \
+           "--input #{@options[:input_files].first} " \
+           "--output-dir #{File.join(@options[:output_dir], 'images')} " \
+           "--output-format png --quality high")
+  end
+  
+  def export_print_svg(data, basename)
+    system("#{File.expand_path('../grid-visualizer', __dir__)} " \
+           "--input #{@options[:input_files].first} " \
+           "--output-dir #{File.join(@options[:output_dir], 'images')} " \
+           "--output-format svg")
+  end
+  
+  def export_pdf(data, basename)
+    # Would require additional gem like Prawn
+    puts "  PDF export not yet implemented" if @options[:verbose]
+  end
+  
+  def export_csv_data(data, basename)
+    require 'csv'
+    
+    iterations = data.is_a?(Array) ? data : [data]
+    
+    # Export summary CSV
+    summary_file = File.join(@options[:output_dir], 'data', "#{basename}_summary.csv")
+    CSV.open(summary_file, 'w') do |csv|
+      csv << ['iteration', 'population', 'width', 'height', 'density']
+      
+      iterations.each do |iter|
+        grid = iter['grid']
+        population = count_cells(grid)
+        total = grid.length * grid[0].length
+        
+        csv << [
+          iter['iteration'] || 0,
+          population,
+          grid[0].length,
+          grid.length,
+          (population.to_f / total).round(4)
+        ]
+      end
+    end
+    
+    # Export full grid data if requested
+    if @options[:include_metadata]
+      iterations.each do |iter|
+        grid_file = File.join(@options[:output_dir], 'data', 
+                            "#{basename}_grid_#{iter['iteration'] || 0}.csv")
+        CSV.open(grid_file, 'w') do |csv|
+          iter['grid'].each { |row| csv << row }
+        end
+      end
+    end
+  end
+  
+  def export_numpy_format(data, basename)
+    # Would require Python interop or custom implementation
+    puts "  NumPy export not yet implemented" if @options[:verbose]
+  end
+  
+  def export_matlab_format(data, basename)
+    # Export as .mat file (would require additional gem)
+    puts "  MATLAB export not yet implemented" if @options[:verbose]
+  end
+  
+  def export_animated_gif(data, basename)
+    # Would use ImageMagick to create animated GIF
+    puts "  Animated GIF export not yet implemented" if @options[:verbose]
+  end
+  
+  def export_mp4_video(data, basename)
+    # Would use ffmpeg to create video
+    puts "  MP4 video export not yet implemented" if @options[:verbose]
+  end
+  
+  def generate_index
+    # Create an index.html file listing all exports
+    index_file = File.join(@options[:output_dir], 'index.html')
+    
+    html = <<~HTML
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Cellular Automata Exports</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 40px; }
+          .export-list { list-style: none; padding: 0; }
+          .export-item { margin: 10px 0; padding: 10px; border: 1px solid #ddd; }
+          a { text-decoration: none; color: #0066cc; }
+        </style>
+      </head>
+      <body>
+        <h1>Cellular Automata Exports</h1>
+        <p>Generated: #{Time.now}</p>
+        <ul class="export-list">
+    HTML
+    
+    Dir.glob(File.join(@options[:output_dir], '**', '*.html')).each do |file|
+      next if file == index_file
+      
+      relative_path = file.sub(@options[:output_dir] + '/', '')
+      name = File.basename(file, '.html')
+      
+      html += <<~HTML
+          <li class="export-item">
+            <a href="#{relative_path}">#{name}</a>
+          </li>
+      HTML
+    end
+    
+    html += <<~HTML
+        </ul>
+      </body>
+      </html>
+    HTML
+    
+    File.write(index_file, html)
+    puts "Created index: #{index_file}"
+  end
+  
+  def count_cells(grid)
+    grid.flatten.count { |cell| cell > 0 }
+  end
+  
+  def pdf_available?
+    false  # Would check for PDF generation capability
+  end
+  
+  def ffmpeg_available?
+    system('which ffmpeg > /dev/null 2>&1')
+  end
+end
+
+# Run the export engine
+ExportEngine.new.run(ARGV)

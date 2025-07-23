@@ -1,0 +1,309 @@
+#!/usr/bin/env ruby
+
+require 'optparse'
+require 'yaml'
+require 'json'
+require_relative '../lib/automata/grid/base_grid'
+
+class AutomataGenerator
+  def initialize
+    @options = {
+      grid_size: '100x100',
+      grid_type: 'square',
+      rules: 'conway',
+      iterations: 10,
+      output_format: 'json',
+      verbose: false,
+      seed_density: 0.3,
+      output_dir: 'output/automata'
+    }
+    
+    @config = load_configurations
+  end
+  
+  def run(args)
+    parse_options(args)
+    
+    puts "Generating #{@options[:rules]} automaton..." if @options[:verbose]
+    
+    # Parse grid size
+    width, height = @options[:grid_size].split('x').map(&:to_i)
+    
+    # Create grid based on type
+    grid = create_grid(width, height)
+    
+    # Initialize with random seed or pattern
+    seed_grid(grid)
+    
+    # Load automaton rules
+    rules = @config['automata'][@options[:rules]]
+    unless rules
+      puts "Error: Unknown rule set '#{@options[:rules]}'"
+      exit 1
+    end
+    
+    # Run iterations
+    results = []
+    results << export_state(grid, 0) if @options[:save_all_iterations]
+    
+    @options[:iterations].times do |i|
+      puts "Running iteration #{i + 1}/#{@options[:iterations]}..." if @options[:verbose]
+      apply_rules(grid, rules)
+      results << export_state(grid, i + 1) if @options[:save_all_iterations]
+    end
+    
+    # Export final state
+    results << export_state(grid, @options[:iterations]) unless @options[:save_all_iterations]
+    
+    save_output(results)
+    puts "Automaton generation complete!" if @options[:verbose]
+  end
+  
+  private
+  
+  def parse_options(args)
+    OptionParser.new do |opts|
+      opts.banner = "Usage: automata-generator [options]"
+      
+      opts.on("--grid-size SIZE", "Grid dimensions (e.g., 100x100)") do |size|
+        @options[:grid_size] = size
+      end
+      
+      opts.on("--grid-type TYPE", "Grid type: square, hexagonal") do |type|
+        @options[:grid_type] = type
+      end
+      
+      opts.on("--rules RULESET", "Rule set: conway, cave, forest, settlement, magic, custom") do |rules|
+        @options[:rules] = rules
+      end
+      
+      opts.on("--iterations COUNT", Integer, "Number of simulation steps") do |count|
+        @options[:iterations] = count
+      end
+      
+      opts.on("--output-format FORMAT", "Output format: json, csv, png, svg, ascii") do |format|
+        @options[:output_format] = format
+      end
+      
+      opts.on("--seed-density DENSITY", Float, "Initial seed density (0.0-1.0)") do |density|
+        @options[:seed_density] = density.clamp(0.0, 1.0)
+      end
+      
+      opts.on("--seed-pattern PATTERN", "Seed pattern: random, glider, blinker, block") do |pattern|
+        @options[:seed_pattern] = pattern
+      end
+      
+      opts.on("--output-dir DIR", "Output directory") do |dir|
+        @options[:output_dir] = dir
+      end
+      
+      opts.on("--save-all-iterations", "Save every iteration") do
+        @options[:save_all_iterations] = true
+      end
+      
+      opts.on("-v", "--verbose", "Detailed logging") do
+        @options[:verbose] = true
+      end
+      
+      opts.on("-h", "--help", "Show this help message") do
+        puts opts
+        exit
+      end
+    end.parse!(args)
+  end
+  
+  def load_configurations
+    {
+      'automata' => YAML.load_file(File.expand_path('../config/automata.yml', __dir__)),
+      'grids' => YAML.load_file(File.expand_path('../config/grids.yml', __dir__)),
+      'export' => YAML.load_file(File.expand_path('../config/export.yml', __dir__))
+    }
+  end
+  
+  def create_grid(width, height)
+    case @options[:grid_type]
+    when 'square'
+      BaseGrid.new(width, height)
+    when 'hexagonal'
+      # TODO: Implement hexagonal grid
+      puts "Hexagonal grids not yet implemented, using square grid"
+      BaseGrid.new(width, height)
+    else
+      raise "Unknown grid type: #{@options[:grid_type]}"
+    end
+  end
+  
+  def seed_grid(grid)
+    if @options[:seed_pattern]
+      seed_with_pattern(grid, @options[:seed_pattern])
+    else
+      # Random seeding
+      grid.height.times do |y|
+        grid.width.times do |x|
+          grid.set_cell(x, y, rand < @options[:seed_density] ? 1 : 0)
+        end
+      end
+    end
+  end
+  
+  def seed_with_pattern(grid, pattern)
+    # Center patterns in the grid
+    cx, cy = grid.width / 2, grid.height / 2
+    
+    case pattern
+    when 'glider'
+      # Classic glider pattern
+      [[1, 0], [2, 1], [0, 2], [1, 2], [2, 2]].each do |dx, dy|
+        grid.set_cell(cx + dx, cy + dy, 1)
+      end
+    when 'blinker'
+      # Vertical blinker
+      [[-1, 0], [0, 0], [1, 0]].each do |dx, dy|
+        grid.set_cell(cx + dx, cy + dy, 1)
+      end
+    when 'block'
+      # 2x2 block
+      [[0, 0], [1, 0], [0, 1], [1, 1]].each do |dx, dy|
+        grid.set_cell(cx + dx, cy + dy, 1)
+      end
+    else
+      puts "Unknown pattern: #{pattern}, using random seed"
+      seed_grid(grid)
+    end
+  end
+  
+  def apply_rules(grid, rules)
+    new_states = Array.new(grid.height) { Array.new(grid.width, 0) }
+    
+    grid.height.times do |y|
+      grid.width.times do |x|
+        current_state = grid.get_cell(x, y)
+        neighbors = count_neighbors(grid, x, y)
+        
+        new_state = if current_state == 0
+          rules['rules']['birth'].include?(neighbors) ? 1 : 0
+        else
+          rules['rules']['survival'].include?(neighbors) ? 1 : 0
+        end
+        
+        new_states[y][x] = new_state
+      end
+    end
+    
+    # Update grid with new states
+    grid.height.times do |y|
+      grid.width.times do |x|
+        grid.set_cell(x, y, new_states[y][x])
+      end
+    end
+  end
+  
+  def count_neighbors(grid, x, y)
+    count = 0
+    neighbors = @options[:grid_type] == 'square' ? 
+      [[-1,-1], [0,-1], [1,-1], [-1,0], [1,0], [-1,1], [0,1], [1,1]] :
+      [[0,-1], [1,-1], [-1,0], [1,0], [-1,1], [0,1]]  # Hexagonal
+    
+    neighbors.each do |dx, dy|
+      nx, ny = x + dx, y + dy
+      if nx >= 0 && nx < grid.width && ny >= 0 && ny < grid.height
+        count += 1 if grid.get_cell(nx, ny) > 0
+      elsif @config['grids']['defaults']['boundary_condition'] == 'wrap'
+        # Toroidal wrapping
+        nx = (nx + grid.width) % grid.width
+        ny = (ny + grid.height) % grid.height
+        count += 1 if grid.get_cell(nx, ny) > 0
+      end
+    end
+    
+    count
+  end
+  
+  def export_state(grid, iteration)
+    {
+      iteration: iteration,
+      timestamp: Time.now.iso8601,
+      grid: grid.to_array,
+      metadata: {
+        width: grid.width,
+        height: grid.height,
+        rules: @options[:rules],
+        living_cells: count_living_cells(grid)
+      }
+    }
+  end
+  
+  def count_living_cells(grid)
+    count = 0
+    grid.height.times do |y|
+      grid.width.times do |x|
+        count += 1 if grid.get_cell(x, y) > 0
+      end
+    end
+    count
+  end
+  
+  def save_output(results)
+    # Ensure output directory exists
+    require 'fileutils'
+    FileUtils.mkdir_p(@options[:output_dir])
+    
+    timestamp = Time.now.strftime("%Y%m%d_%H%M%S")
+    basename = "#{@options[:rules]}_#{timestamp}"
+    
+    case @options[:output_format]
+    when 'json'
+      save_json(results, basename)
+    when 'csv'
+      save_csv(results, basename)
+    when 'ascii'
+      save_ascii(results, basename)
+    when 'png', 'svg'
+      puts "Image export requires grid-visualizer tool"
+      save_json(results, basename)  # Save data for visualization
+    else
+      puts "Unknown format: #{@options[:output_format]}"
+    end
+  end
+  
+  def save_json(results, basename)
+    filename = File.join(@options[:output_dir], "#{basename}.json")
+    File.write(filename, JSON.pretty_generate(results))
+    puts "Saved to: #{filename}"
+  end
+  
+  def save_csv(results, basename)
+    require 'csv'
+    
+    results.each do |result|
+      filename = File.join(@options[:output_dir], "#{basename}_iter#{result[:iteration]}.csv")
+      CSV.open(filename, 'w') do |csv|
+        result[:grid].each do |row|
+          csv << row
+        end
+      end
+      puts "Saved to: #{filename}" if @options[:verbose]
+    end
+  end
+  
+  def save_ascii(results, basename)
+    chars = @config['export']['image_formats']['ascii']['characters']
+    
+    results.each do |result|
+      filename = File.join(@options[:output_dir], "#{basename}_iter#{result[:iteration]}.txt")
+      File.open(filename, 'w') do |f|
+        f.puts "Iteration: #{result[:iteration]}"
+        f.puts "Living cells: #{result[:metadata][:living_cells]}"
+        f.puts "-" * 80
+        
+        result[:grid].each do |row|
+          f.puts row.map { |cell| cell > 0 ? chars['alive'] : chars['dead'] }.join
+        end
+      end
+      puts "Saved to: #{filename}" if @options[:verbose]
+    end
+  end
+end
+
+# Run the generator
+AutomataGenerator.new.run(ARGV)
