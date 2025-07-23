@@ -370,6 +370,7 @@ class VoxelViewer
               if (this.keys['KeyW']) {
                   const forward = this.getForwardVector();
                   this.camera.position[0] += forward[0] * speed;
+                  this.camera.position[1] += forward[1] * speed;
                   this.camera.position[2] += forward[2] * speed;
                   moved = true;
               }
@@ -377,6 +378,7 @@ class VoxelViewer
               if (this.keys['KeyS']) {
                   const forward = this.getForwardVector();
                   this.camera.position[0] -= forward[0] * speed;
+                  this.camera.position[1] -= forward[1] * speed;
                   this.camera.position[2] -= forward[2] * speed;
                   moved = true;
               }
@@ -420,7 +422,9 @@ class VoxelViewer
           getForwardVector() {
               const cosY = Math.cos(this.camera.rotation[1]);
               const sinY = Math.sin(this.camera.rotation[1]);
-              return [-sinY, 0, -cosY];
+              const cosX = Math.cos(this.camera.rotation[0]);
+              const sinX = Math.sin(this.camera.rotation[0]);
+              return [-sinY * cosX, sinX, -cosY * cosX];
           }
           
           getRightVector() {

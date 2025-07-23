@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fantasy World Map Viewer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #222;
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
+        
+        #map-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        
+        #map {
+            display: inline-block;
+            line-height: 1;
+            font-family: monospace;
+            font-size: 12px;
+            letter-spacing: 2px;
+            background: #000;
+            padding: 20px;
+            border: 2px solid #444;
+            border-radius: 8px;
+            overflow: auto;
+            max-height: 80vh;
+        }
+        
+        .controls {
+            margin: 20px 0;
+        }
+        
+        button {
+            background: #444;
+            color: #fff;
+            border: 1px solid #666;
+            padding: 10px 20px;
+            margin: 0 5px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        
+        button:hover {
+            background: #555;
+        }
+        
+        .legend {
+            margin-top: 20px;
+            padding: 15px;
+            background: #333;
+            border-radius: 8px;
+            display: inline-block;
+        }
+        
+        .legend-item {
+            display: inline-block;
+            margin: 0 15px;
+        }
+        
+        .info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #333;
+            border-radius: 8px;
+        }
+        
+        h1 {
+            color: #fff;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="map-container">
+        <h1>Fantasy World Map</h1>
+        
+        <div class="controls">
+            <button onclick="loadMap()">Load Map</button>
+            <button onclick="zoomIn()">Zoom In</button>
+            <button onclick="zoomOut()">Zoom Out</button>
+        </div>
+        
+        <div id="map">Loading...</div>
+        
+        <div class="legend">
+            <div class="legend-item">🌱 Grassland</div>
+            <div class="legend-item">🌾 Farmland</div>
+            <div class="legend-item">🏡 Settlement</div>
+            <div class="legend-item">🗻 Mountain</div>
+            <div class="legend-item">💧 Water</div>
+            <div class="legend-item">🌲 Forest</div>
+        </div>
+        
+        <div class="info" id="info">
+            <p>Generated world with seed: 42</p>
+            <p>Size: 120x60</p>
+            <p>Click "Load Map" to display the world</p>
+        </div>
+    </div>
+    
+    <script>
+        let currentZoom = 12;
+        let mapData = null;
+        
+        async function loadMap() {
+            try {
+                // Try to load the detailed JSON data
+                const response = await fetch('../fantasy-world_detailed.json');
+                const data = await response.json();
+                
+                // Extract the map visualization from the data
+                mapData = generateMapFromJSON(data);
+                displayMap();
+                
+                // Update info
+                document.getElementById('info').innerHTML = `
+                    <p>Generated world with seed: ${data.metadata.seed}</p>
+                    <p>Size: ${data.metadata.width}x${data.metadata.height}</p>
+                    <p>Total cells: ${data.metadata.width * data.metadata.height}</p>
+                `;
+            } catch (error) {
+                console.error('Error loading map:', error);
+                // Fallback: display a sample map
+                displaySampleMap();
+            }
+        }
+        
+        function generateMapFromJSON(data) {
+            const width = data.metadata.width;
+            const height = data.metadata.height;
+            const grid = Array(height).fill(null).map(() => Array(width).fill('🌱'));
+            
+            // Convert cell data to grid
+            for (const [key, cell] of Object.entries(data.cells)) {
+                const [x, y] = key.split(',').map(Number);
+                
+                // Determine what to display based on cell properties
+                if (cell.settlement && cell.settlement.size > 0) {
+                    grid[y][x] = '🏡';
+                } else if (cell.elevation > 200) {
+                    grid[y][x] = '🗻';
+                } else if (cell.water_level > 0) {
+                    grid[y][x] = '💧';
+                } else if (cell.vegetation_type === 'forest') {
+                    grid[y][x] = '🌲';
+                } else if (cell.is_farmland) {
+                    grid[y][x] = '🌾';
+                } else {
+                    grid[y][x] = '🌱';
+                }
+            }
+            
+            return grid;
+        }
+        
+        function displayMap() {
+            if (!mapData) return;
+            
+            const mapElement = document.getElementById('map');
+            mapElement.style.fontSize = currentZoom + 'px';
+            mapElement.innerHTML = mapData.map(row => row.join('')).join('<br>');
+        }
+        
+        function displaySampleMap() {
+            // Generate a simple procedural map as fallback
+            const width = 120;
+            const height = 60;
+            const grid = [];
+            
+            for (let y = 0; y < height; y++) {
+                const row = [];
+                for (let x = 0; x < width; x++) {
+                    const noise = Math.random();
+                    if (noise < 0.05) {
+                        row.push('🏡');
+                    } else if (noise < 0.08) {
+                        row.push('🗻');
+                    } else if (noise < 0.15) {
+                        row.push('🌾');
+                    } else if (noise < 0.2) {
+                        row.push('🌲');
+                    } else {
+                        row.push('🌱');
+                    }
+                }
+                grid.push(row);
+            }
+            
+            mapData = grid;
+            displayMap();
+            
+            document.getElementById('info').innerHTML = `
+                <p>Sample procedural world</p>
+                <p>Size: ${width}x${height}</p>
+                <p>Click "Load Map" to load the actual generated world</p>
+            `;
+        }
+        
+        function zoomIn() {
+            currentZoom = Math.min(currentZoom + 2, 24);
+            displayMap();
+        }
+        
+        function zoomOut() {
+            currentZoom = Math.max(currentZoom - 2, 8);
+            displayMap();
+        }
+        
+        // Load sample map on page load
+        window.onload = () => {
+            displaySampleMap();
+        };
+    </script>
+</body>
+</html>

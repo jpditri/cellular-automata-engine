@@ -1,0 +1,430 @@
+#!/usr/bin/env ruby
+
+require 'json'
+
+class CityStreetGenerator
+  def initialize
+    @width = 40
+    @depth = 40
+    @output_file = 'city-street.json'
+    @seed = nil
+  end
+  
+  def run(args)
+    parse_options(args)
+    
+    if args.include?('--help') || args.include?('-h')
+      show_help
+      return
+    end
+    
+    generate_city_street
+  end
+  
+  private
+  
+  def parse_options(args)
+    args.each_with_index do |arg, i|
+      case arg
+      when '--size'
+        size = args[i + 1]
+        @width, @depth = size.split('x').map(&:to_i) if size
+      when '--output'
+        @output_file = args[i + 1] if args[i + 1]
+      when '--seed'
+        @seed = args[i + 1].to_i if args[i + 1]
+      end
+    end
+  end
+  
+  def generate_city_street
+    Random.srand(@seed) if @seed
+    
+    puts "🏙️  Generating City Street Scene (#{@width}x#{@depth})"
+    puts "=" * 60
+    
+    voxel_data = {
+      metadata: {
+        width: @width,
+        height: 100,  # Max building height
+        depth: @depth,
+        world_type: 'city_street',
+        seed: @seed || Random.new_seed,
+        scale: { x: 1.0, y: 1.0, z: 1.0 },
+        voxel_size: 1.0
+      },
+      voxels: []
+    }
+    
+    # Generate city layout
+    generate_ground(voxel_data[:voxels])
+    generate_street(voxel_data[:voxels])
+    generate_sidewalks(voxel_data[:voxels])
+    generate_buildings(voxel_data[:voxels])
+    generate_street_features(voxel_data[:voxels])
+    
+    # Save voxel data
+    save_voxel_file = @output_file.gsub(/\.[^.]+$/, '_voxels.json')
+    File.write(save_voxel_file, JSON.pretty_generate(voxel_data))
+    
+    puts "\n✅ City street generated!"
+    puts "   Voxel count: #{voxel_data[:voxels].length}"
+    puts "   Output file: #{save_voxel_file}"
+    puts "\n🌐 To view in 3D:"
+    puts "   ./bin/voxel-viewer --file #{save_voxel_file} --port 4000"
+  end
+  
+  def generate_ground(voxels)
+    # Create ground layer
+    @width.times do |x|
+      @depth.times do |z|
+        voxels << {
+          x: x, y: 0, z: z,
+          material: 'ground',
+          color: [0.3, 0.3, 0.3],  # Dark gray
+          type: 'ground'
+        }
+      end
+    end
+  end
+  
+  def generate_street(voxels)
+    # Main street running through the middle
+    street_start = @depth / 2 - 3
+    street_end = @depth / 2 + 3
+    
+    @width.times do |x|
+      (street_start..street_end).each do |z|
+        # Asphalt
+        voxels << {
+          x: x, y: 1, z: z,
+          material: 'asphalt',
+          color: [0.2, 0.2, 0.2],  # Dark asphalt
+          type: 'street'
+        }
+        
+        # Yellow center line
+        if z == @depth / 2 && x % 4 < 2
+          voxels << {
+            x: x, y: 1.1, z: z,
+            material: 'paint',
+            color: [1.0, 0.8, 0.0],  # Yellow
+            type: 'street_marking'
+          }
+        end
+      end
+    end
+  end
+  
+  def generate_sidewalks(voxels)
+    # Sidewalks on both sides of the street
+    sidewalk_areas = [
+      { start: @depth / 2 - 6, end: @depth / 2 - 4 },  # North sidewalk
+      { start: @depth / 2 + 4, end: @depth / 2 + 6 }   # South sidewalk
+    ]
+    
+    sidewalk_areas.each do |area|
+      @width.times do |x|
+        (area[:start]..area[:end]).each do |z|
+          # Raised sidewalk
+          voxels << {
+            x: x, y: 1, z: z,
+            material: 'concrete',
+            color: [0.6, 0.6, 0.6],  # Light gray concrete
+            type: 'sidewalk'
+          }
+          
+          # Sidewalk surface
+          voxels << {
+            x: x, y: 2, z: z,
+            material: 'concrete',
+            color: [0.7, 0.7, 0.7],
+            type: 'sidewalk_surface'
+          }
+        end
+      end
+    end
+  end
+  
+  def generate_buildings(voxels)
+    # Buildings on both sides of the street
+    building_zones = [
+      { z_start: 0, z_end: @depth / 2 - 7, side: 'north' },
+      { z_start: @depth / 2 + 7, z_end: @depth - 1, side: 'south' }
+    ]
+    
+    building_zones.each do |zone|
+      x = 2
+      while x < @width - 5
+        # Building dimensions
+        width = rand(6..10)
+        depth = rand(6..10) 
+        height = rand(15..40)
+        
+        # Ensure building fits
+        width = [@width - x - 2, width].min
+        depth = [zone[:z_end] - zone[:z_start] - 2, depth].min
+        
+        # Building position
+        x_pos = x
+        z_pos = zone[:side] == 'north' ? zone[:z_start] + 2 : zone[:z_start]
+        
+        # Create building
+        create_building(voxels, x_pos, z_pos, width, depth, height)
+        
+        # Space between buildings
+        x += width + rand(2..4)
+      end
+    end
+  end
+  
+  def create_building(voxels, x_start, z_start, width, depth, height)
+    # Building colors
+    wall_colors = [
+      [0.7, 0.7, 0.8],  # Light gray
+      [0.8, 0.6, 0.5],  # Brick red
+      [0.6, 0.6, 0.7],  # Blue-gray
+      [0.9, 0.8, 0.7]   # Beige
+    ]
+    building_color = wall_colors.sample
+    
+    # Create building structure
+    (0...height).each do |y|
+      # Building walls
+      width.times do |dx|
+        depth.times do |dz|
+          x = x_start + dx
+          z = z_start + dz
+          
+          # Only create walls (not filled interior)
+          if dx == 0 || dx == width - 1 || dz == 0 || dz == depth - 1
+            # Windows every 3 floors, every other wall segment
+            if y > 0 && y % 3 == 1 && dx % 2 == 1 && dz % 2 == 1
+              # Window
+              voxels << {
+                x: x, y: y + 3, z: z,
+                material: 'glass',
+                color: [0.5, 0.6, 0.8],  # Blue-tinted glass
+                type: 'window'
+              }
+            else
+              # Wall
+              voxels << {
+                x: x, y: y + 3, z: z,
+                material: 'building_wall',
+                color: building_color,
+                type: 'building'
+              }
+            end
+          end
+        end
+      end
+      
+      # Roof
+      if y == height - 1
+        width.times do |dx|
+          depth.times do |dz|
+            voxels << {
+              x: x_start + dx, 
+              y: y + 3, 
+              z: z_start + dz,
+              material: 'roof',
+              color: [0.3, 0.3, 0.3],  # Dark roof
+              type: 'roof'
+            }
+          end
+        end
+      end
+    end
+    
+    # Add entrance at ground level
+    entrance_x = x_start + width / 2
+    (0..2).each do |dy|
+      voxels << {
+        x: entrance_x, 
+        y: dy + 3, 
+        z: z_start + (z_start < @depth / 2 ? depth - 1 : 0),
+        material: 'door',
+        color: [0.4, 0.2, 0.1],  # Brown door
+        type: 'door'
+      }
+    end
+  end
+  
+  def generate_street_features(voxels)
+    # Street lights
+    [8, 16, 24, 32].each do |x|
+      [@depth / 2 - 5, @depth / 2 + 5].each do |z|
+        # Light pole
+        (0..6).each do |y|
+          voxels << {
+            x: x, y: y + 2, z: z,
+            material: 'metal',
+            color: [0.3, 0.3, 0.3],  # Dark metal
+            type: 'street_light'
+          }
+        end
+        
+        # Light fixture
+        voxels << {
+          x: x, y: 9, z: z,
+          material: 'light',
+          color: [1.0, 0.9, 0.7],  # Warm light
+          type: 'light'
+        }
+      end
+    end
+    
+    # Traffic lights at intersections
+    if @width > 20
+      create_traffic_light(voxels, 20, @depth / 2 - 6)
+      create_traffic_light(voxels, 20, @depth / 2 + 6)
+    end
+    
+    # Parked cars
+    [5, 15, 25].each do |x|
+      if x < @width - 4
+        create_parked_car(voxels, x, @depth / 2 - 5)
+        create_parked_car(voxels, x, @depth / 2 + 5)
+      end
+    end
+    
+    # Trees along sidewalk
+    (4...@width).step(8) do |x|
+      [@depth / 2 - 6, @depth / 2 + 6].each do |z|
+        create_tree(voxels, x, z)
+      end
+    end
+  end
+  
+  def create_traffic_light(voxels, x, z)
+    # Pole
+    (0..5).each do |y|
+      voxels << {
+        x: x, y: y + 2, z: z,
+        material: 'metal',
+        color: [0.4, 0.4, 0.4],
+        type: 'traffic_light_pole'
+      }
+    end
+    
+    # Light box
+    voxels << {
+      x: x, y: 7, z: z,
+      material: 'metal',
+      color: [0.2, 0.2, 0.2],
+      type: 'traffic_light_box'
+    }
+    
+    # Lights (red, yellow, green)
+    colors = [[1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]]
+    colors.each_with_index do |color, i|
+      voxels << {
+        x: x, y: 7 - i * 0.3, z: z + 0.1,
+        material: 'light',
+        color: color,
+        type: 'traffic_light'
+      }
+    end
+  end
+  
+  def create_parked_car(voxels, x, z)
+    car_colors = [
+      [0.8, 0.2, 0.2],  # Red
+      [0.2, 0.2, 0.8],  # Blue
+      [0.2, 0.2, 0.2],  # Black
+      [0.8, 0.8, 0.8],  # Silver
+      [0.2, 0.6, 0.2]   # Green
+    ]
+    car_color = car_colors.sample
+    
+    # Car body
+    (0..1).each do |y|
+      (0..3).each do |dx|
+        (0..1).each do |dz|
+          voxels << {
+            x: x + dx, y: y + 2, z: z + dz,
+            material: 'metal',
+            color: car_color,
+            type: 'car'
+          }
+        end
+      end
+    end
+    
+    # Wheels
+    [[0, 0], [3, 0], [0, 1], [3, 1]].each do |dx, dz|
+      voxels << {
+        x: x + dx, y: 1, z: z + dz,
+        material: 'rubber',
+        color: [0.1, 0.1, 0.1],  # Black tires
+        type: 'wheel'
+      }
+    end
+    
+    # Windows
+    (1..2).each do |dx|
+      voxels << {
+        x: x + dx, y: 3, z: z,
+        material: 'glass',
+        color: [0.3, 0.3, 0.4],
+        type: 'car_window'
+      }
+    end
+  end
+  
+  def create_tree(voxels, x, z)
+    # Tree trunk
+    (0..3).each do |y|
+      voxels << {
+        x: x, y: y + 2, z: z,
+        material: 'wood',
+        color: [0.4, 0.3, 0.2],
+        type: 'tree_trunk'
+      }
+    end
+    
+    # Tree canopy (sphere-ish)
+    canopy_positions = [
+      [0, 4, 0], [1, 4, 0], [-1, 4, 0], [0, 4, 1], [0, 4, -1],
+      [0, 5, 0], [1, 5, 0], [-1, 5, 0], [0, 5, 1], [0, 5, -1],
+      [0, 6, 0]
+    ]
+    
+    canopy_positions.each do |dx, dy, dz|
+      if x + dx >= 0 && x + dx < @width && z + dz >= 0 && z + dz < @depth
+        voxels << {
+          x: x + dx, y: dy + 2, z: z + dz,
+          material: 'leaves',
+          color: [0.2, 0.6, 0.2],
+          type: 'tree_leaves'
+        }
+      end
+    end
+  end
+  
+  def show_help
+    puts "city-street-generator - Generate 3D city street scenes"
+    puts ""
+    puts "USAGE:"
+    puts "  ./bin/city-street-generator [OPTIONS]"
+    puts ""
+    puts "OPTIONS:"
+    puts "  --size WIDTHxDEPTH   Street dimensions (default: 40x40)"
+    puts "  --output FILE        Output filename (default: city-street.json)"
+    puts "  --seed NUMBER        Random seed for reproducible generation"
+    puts "  --help, -h           Show this help"
+    puts ""
+    puts "EXAMPLES:"
+    puts "  ./bin/city-street-generator"
+    puts "  ./bin/city-street-generator --size 60x60 --seed 12345"
+    puts ""
+    puts "VIEW IN 3D:"
+    puts "  ./bin/voxel-viewer --file city-street_voxels.json --port 4000"
+  end
+end
+
+if __FILE__ == $0
+  generator = CityStreetGenerator.new
+  generator.run(ARGV)
+end

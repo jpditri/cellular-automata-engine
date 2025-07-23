@@ -51,6 +51,7 @@ class WorldGenerator
     @height = 40
     @world_type = 'balanced'
     @seed = nil
+    @options = {}
     @options[:output_file] = nil
     @verbose = false
     @options[:show_layers] = []
@@ -342,13 +343,16 @@ class WorldGenerator
     
     voxel_data = {
       metadata: {
-        width: @width,
-        height: @height,
-        max_height: 32,
+        width: @width * 4,  # 4x subdivision for higher resolution
+        height: @height * 4,  # 4x subdivision for higher resolution
+        max_height: 20,  # Increased to accommodate curvature
         seed: grid.seed,
         world_type: @options[:rules],
-        scale: { x: 0.25, y: 0.25, z: 0.25 },  # Very detailed small voxels
-        voxel_size: 0.25  # Each voxel is 0.25 units (4x detail)
+        scale: { x: 0.0625, y: 0.0625, z: 0.125 },  # Ultra-high detail (16x on X/Y, 8x on Z)
+        voxel_size: 0.0625,  # Each voxel is 0.0625 units (16x detail)
+        subdivision: 4,  # Track subdivision level
+        curvature: true,  # Indicates curved terrain
+        curve_amplitude: 12.0  # Maximum curvature height
       },
       voxels: generate_surface_voxels(grid)
     }
@@ -361,22 +365,66 @@ class WorldGenerator
   def generate_surface_voxels(grid)
     voxels = []
     
-    # Generate just surface terrain with detailed features
+    # Generate ultra-thin surface terrain with very high detail
+    # Each cell is now subdivided into 4x4 blocks for higher resolution
+    subdivision = 4
+    
+    # Get world dimensions for curvature calculations
+    world_width = @width * subdivision
+    world_height = @height * subdivision
+    center_x = world_width / 2.0
+    center_y = world_height / 2.0
+    
+    # Curvature parameters
+    curve_radius = [world_width, world_height].max * 0.8  # Radius for spherical curvature
+    curve_amplitude = 12.0  # Maximum curvature height
+    
     grid.each_cell do |x, y, cell|
-      ground_height = [(cell.elevation / 16.0).round, 1].max  # Very low terrain
+      # Much thinner terrain - max height of 8 blocks instead of 16
+      base_height = [(cell.elevation / 32.0).round, 0.5].max  # Ultra-thin terrain
       
-      # Add thin ground layer (just 1-2 voxels deep)
-      (0...ground_height).each do |z|
-        voxels << {
-          x: x, y: y, z: z,
-          material: 'ground',
-          color: determine_ground_color(cell),
-          type: 'ground'
-        }
+      # Create 4x4 subdivision within each cell for higher resolution
+      subdivision.times do |sx|
+        subdivision.times do |sy|
+          # Calculate sub-cell position
+          sub_x = x * subdivision + sx
+          sub_y = y * subdivision + sy
+          
+          # Calculate distance from center for spherical curvature
+          dx = (sub_x - center_x) / curve_radius
+          dy = (sub_y - center_y) / curve_radius
+          distance_from_center = Math.sqrt(dx * dx + dy * dy)
+          
+          # Apply spherical curvature (parabolic falloff from center)
+          curvature = curve_amplitude * (1.0 - [distance_from_center, 1.0].min ** 2)
+          
+          # Add wave-like deformation for more organic feel
+          wave_x = Math.sin(sub_x * 0.05) * 2.0
+          wave_y = Math.cos(sub_y * 0.05) * 2.0
+          wave_combined = (wave_x + wave_y) * 0.3
+          
+          # Add some micro-variation to height
+          height_variation = (Math.sin(sub_x * 0.3) * Math.cos(sub_y * 0.3) * 0.5).round
+          
+          # Combine all height components
+          ground_height = [base_height + height_variation + curvature + wave_combined, 0.5].max
+          
+          # Add ultra-thin ground layer with curvature
+          (0...ground_height).each do |z|
+            voxels << {
+              x: sub_x, y: sub_y, z: z,
+              material: 'ground',
+              color: determine_ground_color(cell),
+              type: 'ground'
+            }
+          end
+          
+          # Add detailed surface features at subdivision level
+          if sx == 0 && sy == 0  # Only add features to one sub-cell per main cell
+            add_detailed_surface_features(cell, sub_x, sub_y, ground_height, voxels, subdivision)
+          end
+        end
       end
-      
-      # Add detailed surface features
-      add_detailed_surface_features(cell, x, y, ground_height, voxels)
     end
     
     voxels
@@ -515,7 +563,7 @@ class WorldGenerator
     end
   end
   
-  def add_detailed_surface_features(cell, x, y, ground_height, voxels)
+  def add_detailed_surface_features(cell, x, y, ground_height, voxels, subdivision = 1)
     # Add settlements as detailed structures
     case cell.settlement_type
     when :city, :town
