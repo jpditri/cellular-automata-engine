@@ -1,0 +1,104 @@
+# Agent Squad Deployment Configuration
+# IMF Oversight: Cellular Automaton Engine Project
+
+metadata:
+  project: cellular-automaton-engine
+  oversight: IMF-2024-CA-001
+  deployment_type: multi-squad-coordination
+  standard_work_pattern: autonomous-development-constellation
+
+squads:
+  grid_architecture_squad:
+    lead_agent: grid-architect-prime
+    tier: 3
+    members:
+      - square-grid-specialist
+      - hex-grid-mathematician
+      - sparse-matrix-optimizer
+      - boundary-condition-handler
+    recruitment_authority: true
+    standard_work:
+      - grid-system-design-pattern
+      - performance-optimization-workflow
+      - mathematical-validation-procedures
+    
+  rule_engine_squad:
+    lead_agent: rule-engine-master
+    tier: 3
+    members:
+      - pattern-matching-specialist
+      - state-transition-engineer
+      - dsl-parser-expert
+      - rule-compiler-optimizer
+    recruitment_authority: true
+    standard_work:
+      - rule-definition-workflow
+      - performance-profiling-pattern
+      - validation-test-generation
+    
+  visualization_squad:
+    lead_agent: render-pipeline-coordinator
+    tier: 3
+    members:
+      - ascii-art-specialist
+      - canvas-rendering-expert
+      - webgl-shader-programmer
+      - animation-timing-engineer
+    recruitment_authority: true
+    standard_work:
+      - multi-renderer-pattern
+      - frame-optimization-workflow
+      - cross-platform-testing
+    
+  web_integration_squad:
+    lead_agent: isomorphic-bridge-architect
+    tier: 4
+    members:
+      - opal-transpilation-expert
+      - websocket-communication-specialist
+      - wasm-compilation-engineer
+      - frontend-integration-specialist
+    recruitment_authority: true
+    standard_work:
+      - isomorphic-deployment-pattern
+      - real-time-sync-workflow
+      - browser-compatibility-matrix
+
+coordination:
+  communication_protocol: 
+    type: event-driven-mesh
+    channels:
+      - squad-to-squad-sync
+      - imf-oversight-reporting
+      - blocker-escalation-rapid
+  
+  synchronization_points:
+    - name: architecture-review
+      frequency: daily
+      participants: all_squad_leads
+    - name: integration-checkpoint
+      frequency: per_milestone
+      participants: all_squads
+    - name: imf-progress-report
+      frequency: twice_daily
+      participants: squad_leads
+
+recruitment_parameters:
+  auto_scale: true
+  max_agents_per_squad: 12
+  specialization_threshold: 0.8
+  cross_training_enabled: true
+  
+standard_work_references:
+  - autonomous-squad-pattern-v3
+  - imf-coordination-protocol-2024
+  - rapid-development-constellation
+  - quality-gate-automation
+
+deployment_command: |
+  # Deploy all squads with IMF oversight
+  ./computer standard-work execute agent-squad-deployment \
+    --config cellular-automata-engine/AGENT_SQUAD_DEPLOYMENT.yaml \
+    --imf-oversight enabled \
+    --auto-recruitment true \
+    --monitoring dashboard
