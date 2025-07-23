@@ -1,0 +1,207 @@
+#!/usr/bin/env ruby
+
+require_relative '../lib/automata/grid/base_grid'
+
+# Square Grid implementation
+class SquareGrid < Automata::Grid::BaseGrid
+  def neighbors(x, y)
+    [
+      [x-1, y-1], [x, y-1], [x+1, y-1],
+      [x-1, y],             [x+1, y],
+      [x-1, y+1], [x, y+1], [x+1, y+1]
+    ]
+  end
+end
+
+# Conway's Game of Life rules
+class ConwayRules
+  def self.apply(grid, x, y)
+    current = grid.get(x, y)
+    neighbors = grid.neighbor_values(x, y).sum
+    
+    if current == 1
+      neighbors == 2 || neighbors == 3 ? 1 : 0
+    else
+      neighbors == 3 ? 1 : 0
+    end
+  end
+end
+
+# Cave generation rules (more suitable for terrain)
+class CaveRules
+  def self.apply(grid, x, y)
+    current = grid.get(x, y)
+    neighbors = grid.neighbor_values(x, y).sum
+    
+    # Cave generation: walls survive with 4+ neighbors, become walls with 5+ neighbors
+    if current == 1
+      neighbors >= 3 ? 1 : 0  # Walls need 3+ neighbors to survive
+    else
+      neighbors >= 5 ? 1 : 0  # Empty spaces become walls with 5+ neighbors
+    end
+  end
+end
+
+class TerrainGenerator
+  TERRAIN_TYPES = {
+    'cave' => { char: '█', empty: '·', name: 'Cave System' },
+    'forest' => { char: '🌲', empty: '🌱', name: 'Forest' },
+    'mountain' => { char: '⛰️', empty: '🏔️', name: 'Mountain Range' },
+    'water' => { char: '🌊', empty: '🏖️', name: 'Coastline' },
+    'desert' => { char: '🏜️', empty: '🌵', name: 'Desert Oasis' }
+  }
+
+  def initialize
+    @width = 80
+    @height = 40
+    @terrain_type = 'cave'
+    @iterations = 5
+    @density = 0.45
+    @output_file = nil
+  end
+
+  def run(args)
+    parse_options(args)
+    
+    if args.include?('--help') || args.include?('-h')
+      show_help
+      return
+    end
+
+    generate_terrain
+  end
+
+  private
+
+  def parse_options(args)
+    args.each_with_index do |arg, i|
+      case arg
+      when '--size'
+        size = args[i + 1]
+        @width, @height = size.split('x').map(&:to_i) if size
+      when '--terrain'
+        @terrain_type = args[i + 1] if args[i + 1]
+      when '--iterations'
+        @iterations = args[i + 1].to_i if args[i + 1]
+      when '--density'
+        @density = args[i + 1].to_f if args[i + 1]
+      when '--output'
+        @output_file = args[i + 1] if args[i + 1]
+      end
+    end
+  end
+
+  def generate_terrain
+    terrain_config = TERRAIN_TYPES[@terrain_type] || TERRAIN_TYPES['cave']
+    
+    puts "🗺️  Generating #{terrain_config[:name]} (#{@width}x#{@height})"
+    puts "⚙️  Iterations: #{@iterations}, Density: #{@density}"
+    puts "=" * 60
+    
+    # Create and initialize grid
+    grid = SquareGrid.new(@width, @height)
+    grid.randomize(density: @density)
+    
+    # Apply cellular automata rules
+    @iterations.times do |i|
+      puts "🔄 Iteration #{i + 1}/#{@iterations}" if @iterations > 3
+      grid = apply_rules(grid)
+    end
+    
+    # Display results
+    display_terrain(grid, terrain_config)
+    show_stats(grid)
+    
+    # Save to file if requested
+    save_to_file(grid, terrain_config) if @output_file
+  end
+
+  def apply_rules(grid)
+    new_grid = grid.clone
+    
+    grid.each_cell do |x, y, _|
+      new_value = case @terrain_type
+                  when 'cave'
+                    CaveRules.apply(grid, x, y)
+                  else
+                    ConwayRules.apply(grid, x, y)
+                  end
+      new_grid.set(x, y, new_value)
+    end
+    
+    new_grid
+  end
+
+  def display_terrain(grid, config)
+    puts "\n🗺️  Generated Terrain:"
+    puts "-" * (@width + 2)
+    
+    grid.to_a.each do |row|
+      print "|"
+      row.each do |cell|
+        if cell == 1
+          print config[:char] == '█' ? '█' : '🌲'  # Use simple char for wide display
+        else
+          print config[:empty] == '·' ? ' ' : '·'
+        end
+      end
+      puts "|"
+    end
+    
+    puts "-" * (@width + 2)
+  end
+
+  def show_stats(grid)
+    stats = grid.stats
+    puts "\n📊 Terrain Statistics:"
+    puts "   Size: #{stats[:width]}x#{stats[:height]}"
+    puts "   Active cells: #{stats[:active_cells]}"
+    puts "   Density: #{(stats[:density] * 100).round(1)}%"
+    puts "   Generation: #{stats[:generation]}"
+  end
+
+  def save_to_file(grid, config)
+    content = "# Generated #{config[:name]}\n"
+    content += "# Size: #{@width}x#{@height}, Iterations: #{@iterations}\n\n"
+    
+    grid.to_a.each do |row|
+      row.each do |cell|
+        content += cell == 1 ? config[:char] : config[:empty]
+      end
+      content += "\n"
+    end
+    
+    File.write(@output_file, content)
+    puts "💾 Saved to: #{@output_file}"
+  end
+
+  def show_help
+    puts "terrain-generator - Generate D&D terrain maps using cellular automata"
+    puts ""
+    puts "USAGE:"
+    puts "  ./bin/terrain-generator [OPTIONS]"
+    puts ""
+    puts "OPTIONS:"
+    puts "  --size WIDTHxHEIGHT    Grid size (default: 80x40)"
+    puts "  --terrain TYPE         Terrain type (default: cave)"
+    puts "  --iterations N         Number of CA iterations (default: 5)"
+    puts "  --density FLOAT        Initial density 0.0-1.0 (default: 0.45)"
+    puts "  --output FILE          Save result to file"
+    puts "  --help, -h             Show this help"
+    puts ""
+    puts "TERRAIN TYPES:"
+    TERRAIN_TYPES.each do |type, config|
+      puts "  #{type.ljust(10)} #{config[:name]}"
+    end
+    puts ""
+    puts "EXAMPLES:"
+    puts "  ./bin/terrain-generator --terrain cave --size 60x30"
+    puts "  ./bin/terrain-generator --terrain forest --iterations 3 --output forest-map.txt"
+    puts "  ./bin/terrain-generator --terrain mountain --density 0.3"
+  end
+end
+
+if __FILE__ == $0
+  generator = TerrainGenerator.new
+  generator.run(ARGV)
+end

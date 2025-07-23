@@ -1,0 +1,245 @@
+#!/usr/bin/env ruby
+
+require_relative '../lib/automata/grid/base_grid'
+
+# Square Grid implementation
+class SettlementGrid < Automata::Grid::BaseGrid
+  def neighbors(x, y)
+    [
+      [x-1, y-1], [x, y-1], [x+1, y-1],
+      [x-1, y],             [x+1, y],
+      [x-1, y+1], [x, y+1], [x+1, y+1]
+    ]
+  end
+end
+
+# Settlement growth rules
+class SettlementRules
+  def self.apply(grid, x, y)
+    current = grid.get(x, y)
+    neighbors = grid.neighbor_values(x, y).sum
+    
+    # Settlement growth patterns:
+    # 0 = empty land, 1 = farmland, 2 = houses, 3 = dense settlement
+    case current
+    when 0  # Empty land
+      neighbors >= 2 && neighbors <= 3 ? 1 : 0  # Becomes farmland
+    when 1  # Farmland
+      neighbors >= 4 ? 2 : 1  # Becomes houses with enough development
+    when 2  # Houses
+      neighbors >= 6 ? 3 : 2  # Becomes dense settlement
+    when 3  # Dense settlement
+      neighbors >= 2 ? 3 : 2  # Remains dense or becomes houses
+    else
+      0
+    end
+  end
+end
+
+class SettlementGenerator
+  SETTLEMENT_CHARS = {
+    0 => '·',  # Empty land
+    1 => '🌾', # Farmland
+    2 => '🏠', # Houses
+    3 => '🏰'  # Dense settlement/castle
+  }
+
+  def initialize
+    @width = 60
+    @height = 30
+    @years = 10
+    @initial_settlements = 3
+    @output_file = nil
+    @show_progress = false
+  end
+
+  def run(args)
+    parse_options(args)
+    
+    if args.include?('--help') || args.include?('-h')
+      show_help
+      return
+    end
+
+    simulate_settlement_growth
+  end
+
+  private
+
+  def parse_options(args)
+    args.each_with_index do |arg, i|
+      case arg
+      when '--size'
+        size = args[i + 1]
+        @width, @height = size.split('x').map(&:to_i) if size
+      when '--years'
+        @years = args[i + 1].to_i if args[i + 1]
+      when '--settlements'
+        @initial_settlements = args[i + 1].to_i if args[i + 1]
+      when '--output'
+        @output_file = args[i + 1] if args[i + 1]
+      when '--progress'
+        @show_progress = true
+      end
+    end
+  end
+
+  def simulate_settlement_growth
+    puts "🏘️  Simulating Settlement Growth"
+    puts "📊 Size: #{@width}x#{@height}, Years: #{@years}, Initial settlements: #{@initial_settlements}"
+    puts "=" * 60
+    
+    # Create and initialize grid with random settlements
+    grid = SettlementGrid.new(@width, @height)
+    seed_initial_settlements(grid)
+    
+    puts "📅 Year 0 (Initial settlements):"
+    display_settlement(grid)
+    
+    # Simulate growth over time
+    (1..@years).each do |year|
+      grid = apply_settlement_rules(grid)
+      
+      if @show_progress || year % 5 == 0 || year == @years
+        puts "\n📅 Year #{year}:"
+        display_settlement(grid)
+        show_settlement_stats(grid, year)
+      end
+    end
+    
+    # Final summary
+    puts "\n" + "=" * 60
+    puts "🏁 Final Settlement After #{@years} Years"
+    show_settlement_stats(grid, @years)
+    
+    # Save to file if requested
+    save_settlement_to_file(grid) if @output_file
+  end
+
+  def seed_initial_settlements(grid)
+    @initial_settlements.times do
+      # Place initial settlements randomly
+      x = rand(@width)
+      y = rand(@height)
+      
+      # Create a small cluster around each initial settlement
+      (-1..1).each do |dx|
+        (-1..1).each do |dy|
+          if rand < 0.7  # 70% chance for each cell in the cluster
+            grid.set(x + dx, y + dy, rand < 0.3 ? 2 : 1)  # Houses or farmland
+          end
+        end
+      end
+    end
+  end
+
+  def apply_settlement_rules(grid)
+    new_grid = grid.clone
+    
+    grid.each_cell do |x, y, _|
+      new_value = SettlementRules.apply(grid, x, y)
+      new_grid.set(x, y, new_value)
+    end
+    
+    new_grid
+  end
+
+  def display_settlement(grid)
+    # Show a compact view
+    puts "┌" + "─" * @width + "┐"
+    
+    grid.to_a.each do |row|
+      print "│"
+      row.each do |cell|
+        case cell
+        when 0 then print '·'
+        when 1 then print '░'  # Light farmland
+        when 2 then print '▓'  # Medium houses
+        when 3 then print '█'  # Dense settlement
+        else print '?'
+        end
+      end
+      puts "│"
+    end
+    
+    puts "└" + "─" * @width + "┘"
+  end
+
+  def show_settlement_stats(grid, year)
+    stats = analyze_settlement(grid)
+    
+    puts "📈 Settlement Statistics (Year #{year}):"
+    puts "   Empty land: #{stats[:empty]} (#{stats[:empty_pct]}%)"
+    puts "   Farmland: #{stats[:farmland]} (#{stats[:farmland_pct]}%)"
+    puts "   Houses: #{stats[:houses]} (#{stats[:houses_pct]}%)"
+    puts "   Dense areas: #{stats[:dense]} (#{stats[:dense_pct]}%)"
+    puts "   Total population estimate: #{stats[:population]}"
+  end
+
+  def analyze_settlement(grid)
+    counts = { 0 => 0, 1 => 0, 2 => 0, 3 => 0 }
+    total_cells = @width * @height
+    
+    grid.each_cell do |x, y, value|
+      counts[value] += 1
+    end
+    
+    {
+      empty: counts[0],
+      farmland: counts[1],
+      houses: counts[2],
+      dense: counts[3],
+      empty_pct: (counts[0] * 100.0 / total_cells).round(1),
+      farmland_pct: (counts[1] * 100.0 / total_cells).round(1),
+      houses_pct: (counts[2] * 100.0 / total_cells).round(1),
+      dense_pct: (counts[3] * 100.0 / total_cells).round(1),
+      population: counts[1] * 5 + counts[2] * 25 + counts[3] * 100  # Estimated population
+    }
+  end
+
+  def save_settlement_to_file(grid)
+    content = "# Settlement Growth Simulation\n"
+    content += "# Size: #{@width}x#{@height}, Years: #{@years}\n\n"
+    
+    grid.to_a.each do |row|
+      row.each do |cell|
+        content += SETTLEMENT_CHARS[cell] || '?'
+      end
+      content += "\n"
+    end
+    
+    File.write(@output_file, content)
+    puts "💾 Settlement map saved to: #{@output_file}"
+  end
+
+  def show_help
+    puts "settlement-generator - Simulate D&D settlement growth using cellular automata"
+    puts ""
+    puts "USAGE:"
+    puts "  ./bin/settlement-generator [OPTIONS]"
+    puts ""
+    puts "OPTIONS:"
+    puts "  --size WIDTHxHEIGHT    Grid size (default: 60x30)"
+    puts "  --years N              Years to simulate (default: 10)"
+    puts "  --settlements N        Initial settlements (default: 3)"
+    puts "  --progress             Show progress every year"
+    puts "  --output FILE          Save final result to file"
+    puts "  --help, -h             Show this help"
+    puts ""
+    puts "LEGEND:"
+    puts "  ·  Empty land"
+    puts "  ░  Farmland"
+    puts "  ▓  Houses"
+    puts "  █  Dense settlement/cities"
+    puts ""
+    puts "EXAMPLES:"
+    puts "  ./bin/settlement-generator --years 20 --progress"
+    puts "  ./bin/settlement-generator --size 80x40 --settlements 5"
+    puts "  ./bin/settlement-generator --years 15 --output kingdom-growth.txt"
+  end
+end
+
+if __FILE__ == $0
+  generator = SettlementGenerator.new
+  generator.run(ARGV)
+end
