@@ -1,0 +1,854 @@
+#!/usr/bin/env ruby
+
+require_relative '../lib/automata/ecosystem_grid'
+
+class WorldGenerator
+  WORLD_TYPES = {
+    'balanced' => {
+      name: 'Balanced World',
+      elevation_density: 0.4,
+      elevation_iterations: 3,
+      water_threshold: 80,
+      settlement_density: 0.02,
+      feature_density: 0.01
+    },
+    'mountainous' => {
+      name: 'Mountainous Realm',
+      elevation_density: 0.6,
+      elevation_iterations: 4,
+      water_threshold: 60,
+      settlement_density: 0.015,
+      feature_density: 0.02
+    },
+    'archipelago' => {
+      name: 'Island Archipelago',
+      elevation_density: 0.3,
+      elevation_iterations: 2,
+      water_threshold: 120,
+      settlement_density: 0.025,
+      feature_density: 0.008
+    },
+    'desert' => {
+      name: 'Desert Kingdom',
+      elevation_density: 0.35,
+      elevation_iterations: 3,
+      water_threshold: 40,
+      settlement_density: 0.01,
+      feature_density: 0.015
+    },
+    'wilderness' => {
+      name: 'Untamed Wilderness',
+      elevation_density: 0.45,
+      elevation_iterations: 5,
+      water_threshold: 90,
+      settlement_density: 0.005,
+      feature_density: 0.025
+    }
+  }
+
+  def initialize
+    @width = 80
+    @height = 40
+    @world_type = 'balanced'
+    @seed = nil
+    @output_file = nil
+    @verbose = false
+    @show_layers = []
+  end
+
+  def run(args)
+    parse_options(args)
+    
+    if args.include?('--help') || args.include?('-h')
+      show_help
+      return
+    end
+
+    generate_world
+  end
+
+  private
+
+  def parse_options(args)
+    args.each_with_index do |arg, i|
+      case arg
+      when '--size'
+        size = args[i + 1]
+        @width, @height = size.split('x').map(&:to_i) if size
+      when '--type'
+        @world_type = args[i + 1] if args[i + 1]
+      when '--seed'
+        @seed = args[i + 1].to_i if args[i + 1]
+      when '--output'
+        @output_file = args[i + 1] if args[i + 1]
+      when '--verbose'
+        @verbose = true
+      when '--show-layers'
+        @show_layers = args[i + 1].split(',') if args[i + 1]
+      end
+    end
+  end
+
+  def generate_world
+    world_config = WORLD_TYPES[@world_type] || WORLD_TYPES['balanced']
+    
+    puts "🌍 Generating #{world_config[:name]} (#{@width}x#{@height})"
+    puts "🎲 Seed: #{@seed || 'random'}"
+    puts "=" * 60
+    
+    # Create ecosystem grid
+    grid = Automata::EcosystemGrid.new(@width, @height, seed: @seed)
+    
+    # Generate the complete ecosystem
+    grid.generate_ecosystem(world_config.merge(verbose: @verbose))
+    
+    # Display results
+    puts "\n🗺️  Generated World Overview:"
+    display_world_overview(grid)
+    
+    # Show individual layers if requested
+    if @show_layers.any?
+      @show_layers.each { |layer| display_layer(grid, layer) }
+    end
+    
+    # Show world statistics
+    show_world_statistics(grid)
+    
+    # Save to file if requested
+    save_world_to_file(grid, world_config) if @output_file
+  end
+
+  def display_world_overview(grid)
+    puts "┌" + "─" * @width + "┐"
+    
+    @height.times do |y|
+      print "│"
+      @width.times do |x|
+        cell = grid.get(x, y)
+        print cell ? cell.display_char : '?'
+      end
+      puts "│"
+    end
+    
+    puts "└" + "─" * @width + "┘"
+  end
+
+  def display_layer(grid, layer_name)
+    puts "\n📊 #{layer_name.capitalize} Layer:"
+    puts "┌" + "─" * @width + "┐"
+    
+    @height.times do |y|
+      print "│"
+      @width.times do |x|
+        cell = grid.get(x, y)
+        char = get_layer_char(cell, layer_name)
+        print char
+      end
+      puts "│"
+    end
+    
+    puts "└" + "─" * @width + "┘"
+  end
+
+  def get_layer_char(cell, layer)
+    return '?' unless cell
+    
+    case layer.downcase
+    when 'elevation'
+      if cell.elevation > 200 then '█'
+      elsif cell.elevation > 160 then '▓'
+      elsif cell.elevation > 120 then '▒'
+      elsif cell.elevation > 80 then '░'
+      else '·'
+      end
+    when 'water'
+      if cell.water_level > 100 then '█'
+      elsif cell.water_level > 50 then '▓'
+      elsif cell.water_level > 0 then '▒'
+      elsif cell.water_flow != :none then '~'
+      else '·'
+      end
+    when 'climate'
+      case cell.climate_zone
+      when :arctic then '❄'
+      when :temperate then '🌡'
+      when :tropical then '🔥'
+      when :desert then '☀'
+      else '?'
+      end
+    when 'biome'
+      case cell.biome_type
+      when :ocean then '🌊'
+      when :forest then '🌲'
+      when :grassland then '🌾'
+      when :desert then '🏜'
+      when :mountain then '⛰'
+      when :tundra then '❄'
+      else '?'
+      end
+    when 'settlement'
+      case cell.settlement_type
+      when :city then '🏰'
+      when :town then '🏘'
+      when :village then '🏠'
+      when :hamlet then '🏡'
+      when :farmland then '🌾'
+      else '·'
+      end
+    when 'vegetation'
+      if cell.vegetation_density > 192 then '█'
+      elsif cell.vegetation_density > 128 then '▓'
+      elsif cell.vegetation_density > 64 then '▒'
+      elsif cell.vegetation_density > 32 then '░'
+      else '·'
+      end
+    when 'resources'
+      if cell.mineral_deposits.any? then '💎'
+      elsif cell.magical_energy > 180 then '✨'
+      elsif cell.soil_fertility > 180 then '🌱'
+      else '·'
+      end
+    when 'danger'
+      if cell.danger_level > 180 then '☠'
+      elsif cell.danger_level > 128 then '⚡'
+      elsif cell.danger_level > 80 then '⚠'
+      else '·'
+      end
+    else
+      '?'
+    end
+  end
+
+  def show_world_statistics(grid)
+    stats = analyze_world(grid)
+    
+    puts "\n📈 World Statistics:"
+    puts "   🌍 Total area: #{@width}x#{@height} (#{@width * @height} cells)"
+    puts "   🌊 Water coverage: #{stats[:water_cells]} cells (#{stats[:water_pct]}%)"
+    puts "   🏔️  Mountainous: #{stats[:mountain_cells]} cells (#{stats[:mountain_pct]}%)"
+    puts "   🌲 Forested: #{stats[:forest_cells]} cells (#{stats[:forest_pct]}%)"
+    puts "   🏘️  Settled: #{stats[:settlement_cells]} cells (#{stats[:settlement_pct]}%)"
+    puts "   🏰 Total population: #{stats[:total_population]}"
+    puts "   ⚔️  Dangerous areas: #{stats[:dangerous_cells]} cells (#{stats[:dangerous_pct]}%)"
+    puts "   ✨ Magical sites: #{stats[:magical_cells]} cells"
+    puts "   🗡️  Special features: #{stats[:special_features]} locations"
+  end
+
+  def analyze_world(grid)
+    water_cells = 0
+    mountain_cells = 0
+    forest_cells = 0
+    settlement_cells = 0
+    dangerous_cells = 0
+    magical_cells = 0
+    special_features = 0
+    total_population = 0
+    total_cells = @width * @height
+
+    grid.each_cell do |x, y, cell|
+      water_cells += 1 if cell.water?
+      mountain_cells += 1 if cell.elevation > 180
+      forest_cells += 1 if cell.biome_type == :forest
+      settlement_cells += 1 if cell.settlement_type != :none
+      dangerous_cells += 1 if cell.danger_level > 100
+      magical_cells += 1 if cell.magical_energy > 150
+      special_features += cell.special_features.size
+      total_population += cell.population_density
+    end
+
+    {
+      water_cells: water_cells,
+      water_pct: (water_cells * 100.0 / total_cells).round(1),
+      mountain_cells: mountain_cells,
+      mountain_pct: (mountain_cells * 100.0 / total_cells).round(1),
+      forest_cells: forest_cells,
+      forest_pct: (forest_cells * 100.0 / total_cells).round(1),
+      settlement_cells: settlement_cells,
+      settlement_pct: (settlement_cells * 100.0 / total_cells).round(1),
+      dangerous_cells: dangerous_cells,
+      dangerous_pct: (dangerous_cells * 100.0 / total_cells).round(1),
+      magical_cells: magical_cells,
+      special_features: special_features,
+      total_population: total_population
+    }
+  end
+
+  def save_world_to_file(grid, config)
+    content = generate_world_file_content(grid, config)
+    File.write(@output_file, content)
+    puts "💾 World saved to: #{@output_file}"
+    
+    # Also save detailed JSON if requested
+    if @output_file.end_with?('.json')
+      save_detailed_json(grid)
+    end
+  end
+
+  def generate_world_file_content(grid, config)
+    content = "# Generated #{config[:name]}\n"
+    content += "# Size: #{@width}x#{@height}\n"
+    content += "# Seed: #{grid.seed}\n"
+    content += "# Generation: #{grid.generation} layers\n\n"
+    
+    content += "## World Overview\n"
+    @height.times do |y|
+      @width.times do |x|
+        cell = grid.get(x, y)
+        content += cell ? cell.display_char : '?'
+      end
+      content += "\n"
+    end
+    
+    content += "\n## Notable Locations\n"
+    grid.each_cell do |x, y, cell|
+      if cell.special_features.any? || [:town, :city].include?(cell.settlement_type)
+        content += "- (#{x},#{y}): #{cell.describe}\n"
+      end
+    end
+    
+    content
+  end
+
+  def save_detailed_json(grid)
+    json_file = @output_file.gsub(/\.[^.]+$/, '_detailed.json')
+    
+    world_data = {
+      metadata: {
+        width: @width,
+        height: @height,
+        seed: grid.seed,
+        generation: grid.generation,
+        world_type: @world_type
+      },
+      cells: {}
+    }
+    
+    grid.each_cell do |x, y, cell|
+      world_data[:cells]["#{x},#{y}"] = cell.to_h
+    end
+    
+    require 'json'
+    File.write(json_file, JSON.pretty_generate(world_data))
+    puts "📊 Detailed data saved to: #{json_file}"
+    
+    # Also generate 3D voxel data if requested
+    if @output_file.include?('3d') || @show_layers.include?('voxel')
+      save_voxel_data(grid)
+    end
+  end
+  
+  def save_voxel_data(grid)
+    voxel_file = @output_file.gsub(/\.[^.]+$/, '_voxels.json')
+    
+    voxel_data = {
+      metadata: {
+        width: @width,
+        height: @height,
+        max_height: 32,
+        seed: grid.seed,
+        world_type: @world_type,
+        scale: { x: 0.25, y: 0.25, z: 0.25 },  # Very detailed small voxels
+        voxel_size: 0.25  # Each voxel is 0.25 units (4x detail)
+      },
+      voxels: generate_surface_voxels(grid)
+    }
+    
+    require 'json'
+    File.write(voxel_file, JSON.pretty_generate(voxel_data))
+    puts "🧊 3D surface voxel data saved to: #{voxel_file}"
+  end
+  
+  def generate_surface_voxels(grid)
+    voxels = []
+    
+    # Generate just surface terrain with detailed features
+    grid.each_cell do |x, y, cell|
+      ground_height = [(cell.elevation / 16.0).round, 1].max  # Very low terrain
+      
+      # Add thin ground layer (just 1-2 voxels deep)
+      (0...ground_height).each do |z|
+        voxels << {
+          x: x, y: y, z: z,
+          material: 'ground',
+          color: determine_ground_color(cell),
+          type: 'ground'
+        }
+      end
+      
+      # Add detailed surface features
+      add_detailed_surface_features(cell, x, y, ground_height, voxels)
+    end
+    
+    voxels
+  end
+  
+  def generate_voxel_grid(grid)
+    voxels = []
+    max_height = 64
+    
+    # Create height map for proper terrain
+    height_map = {}
+    grid.each_cell do |x, y, cell|
+      height = [(cell.elevation / 4.0).round, 2].max  # Higher resolution
+      height_map[[x, y]] = [height, max_height].min
+    end
+    
+    grid.each_cell do |x, y, cell|
+      terrain_height = height_map[[x, y]]
+      
+      # Generate SOLID ground from 0 to terrain height
+      (0...terrain_height).each do |z|
+        voxel = {
+          x: x, y: y, z: z,
+          material: determine_voxel_material(cell, z, terrain_height),
+          color: determine_voxel_color(cell, z, terrain_height),
+          type: 'terrain'
+        }
+        voxels << voxel
+      end
+      
+      # Add water at terrain level if present
+      if cell.water? && cell.water_level > 0
+        water_height = [(cell.water_level / 10.0).round, 1].max
+        
+        (terrain_height...(terrain_height + water_height)).each do |z|
+          voxel = {
+            x: x, y: y, z: z,
+            material: 'water',
+            color: determine_water_color(cell, z - terrain_height),
+            type: 'water'
+          }
+          voxels << voxel
+        end
+      end
+      
+      # Add surface features ON TOP of terrain
+      add_surface_features(cell, x, y, terrain_height, voxels)
+    end
+    
+    voxels
+  end
+  
+  def determine_voxel_material(cell, z, total_height)
+    depth_ratio = z.to_f / total_height
+    
+    # Deep layers are stone/bedrock
+    return 'bedrock' if depth_ratio < 0.2
+    return 'stone' if depth_ratio < 0.5
+    
+    # Surface layers depend on biome
+    case cell.biome_type
+    when :desert then 'sand'
+    when :mountain then 'stone'
+    when :tundra then 'ice'
+    when :forest then 'dirt'
+    when :grassland then 'grass'
+    else 'dirt'
+    end
+  end
+  
+  def determine_voxel_color(cell, z, total_height)
+    depth_ratio = z.to_f / total_height
+    
+    # Bedrock colors
+    return [0.2, 0.2, 0.2] if depth_ratio < 0.2  # Dark gray
+    return [0.4, 0.4, 0.4] if depth_ratio < 0.5  # Gray stone
+    
+    # Surface colors based on biome
+    case cell.biome_type
+    when :desert
+      sand_color = [0.95, 0.8, 0.6]
+      # Vary sand color slightly
+      sand_color.map { |c| c + (rand - 0.5) * 0.1 }
+    when :mountain
+      mountain_gray = [0.6, 0.6, 0.65]
+      mountain_gray.map { |c| c + (rand - 0.5) * 0.15 }
+    when :tundra
+      [0.9, 0.95, 1.0]  # Icy white-blue
+    when :forest
+      # Vary between brown dirt and green moss
+      if cell.vegetation_density > 128
+        [0.2, 0.6, 0.2]  # Green
+      else
+        [0.4, 0.25, 0.1] # Brown dirt
+      end
+    when :grassland
+      # Green with variation based on fertility
+      fertility_factor = cell.soil_fertility / 255.0
+      green_intensity = 0.3 + fertility_factor * 0.4
+      [0.1, green_intensity, 0.1]
+    else
+      [0.5, 0.4, 0.3]  # Default brownish
+    end
+  end
+  
+  def determine_water_color(cell, water_depth)
+    # Water gets darker/bluer with depth
+    depth_factor = [water_depth / 10.0, 1.0].min
+    base_blue = 0.3 + depth_factor * 0.4
+    
+    case cell.water_flow
+    when :river
+      [0.1, 0.3, base_blue]  # Flowing water, slightly greenish
+    when :lake
+      [0.0, 0.2, base_blue]  # Still water, pure blue
+    else
+      [0.1, 0.25, base_blue] # Default water
+    end
+  end
+  
+  def determine_ground_color(cell)
+    case cell.biome_type
+    when :grassland
+      fertility = cell.soil_fertility / 255.0
+      [0.2, 0.4 + fertility * 0.3, 0.1]  # Green grass
+    when :forest
+      [0.3, 0.2, 0.1]  # Forest floor brown
+    when :desert
+      [0.9, 0.8, 0.6]  # Sandy
+    when :mountain
+      [0.5, 0.5, 0.6]  # Rocky gray
+    when :tundra
+      [0.8, 0.9, 1.0]  # Icy white
+    else
+      [0.4, 0.3, 0.2]  # Default dirt
+    end
+  end
+  
+  def add_detailed_surface_features(cell, x, y, ground_height, voxels)
+    # Add settlements as detailed structures
+    case cell.settlement_type
+    when :city, :town
+      # Create detailed buildings with windows and roofs
+      building_height = rand(4..8)
+      (0...building_height).each do |dz|
+        color = if dz == building_height - 1
+          [0.8, 0.3, 0.2]  # Red roof
+        else
+          [0.7 + rand * 0.1, 0.7 + rand * 0.1, 0.8]  # Gray walls
+        end
+        
+        voxels << {
+          x: x, y: y, z: ground_height + dz,
+          material: 'building',
+          color: color,
+          type: 'building'
+        }
+      end
+      
+    when :village, :hamlet
+      # Smaller houses with chimneys
+      building_height = rand(2..4)
+      (0...building_height).each do |dz|
+        color = if dz == building_height - 1
+          [0.6, 0.4, 0.2]  # Brown roof
+        else
+          [0.9, 0.8, 0.7]  # Light walls
+        end
+        
+        voxels << {
+          x: x, y: y, z: ground_height + dz,
+          material: 'house',
+          color: color,
+          type: 'house'
+        }
+      end
+      
+      # Add chimney smoke occasionally
+      if rand < 0.3
+        voxels << {
+          x: x, y: y, z: ground_height + building_height,
+          material: 'smoke',
+          color: [0.8, 0.8, 0.9],
+          type: 'smoke'
+        }
+      end
+      
+    when :farmland
+      # Add detailed crops
+      if rand < 0.8  # 80% chance of crops
+        voxels << {
+          x: x, y: y, z: ground_height,
+          material: 'crops',
+          color: [0.9, 0.8, 0.3 + rand * 0.2],
+          type: 'crops'
+        }
+      end
+    end
+    
+    # Add detailed trees based on forest density
+    if cell.biome_type == :forest && cell.vegetation_density > 100
+      if rand < (cell.vegetation_density / 255.0)  # Probability based on density
+        add_detailed_tree(x, y, ground_height, voxels)
+      end
+    end
+    
+    # Add random vegetation
+    if cell.vegetation_density > 64 && rand < 0.4
+      add_vegetation(cell, x, y, ground_height, voxels)
+    end
+    
+    # Add rocks and boulders
+    if cell.elevation > 150 && rand < 0.2
+      add_rock_formation(x, y, ground_height, voxels)
+    end
+    
+    # Add special feature details
+    if cell.special_features.include?(:dungeon)
+      add_dungeon_entrance(x, y, ground_height, voxels)
+    elsif cell.special_features.include?(:ruins)
+      add_ruins(x, y, ground_height, voxels)
+    end
+  end
+  
+  def add_detailed_tree(x, y, ground_height, voxels)
+    tree_height = rand(3..7)
+    trunk_height = tree_height - 2
+    
+    # Tree trunk (brown)
+    (0...trunk_height).each do |dz|
+      voxels << {
+        x: x, y: y, z: ground_height + dz,
+        material: 'wood',
+        color: [0.4 + rand * 0.1, 0.2 + rand * 0.1, 0.1],
+        type: 'tree_trunk'
+      }
+    end
+    
+    # Tree leaves (green cloud on top)
+    leaf_colors = [
+      [0.1, 0.6, 0.1],
+      [0.2, 0.7, 0.2], 
+      [0.0, 0.5, 0.0]
+    ]
+    
+    (trunk_height...(trunk_height + 2)).each do |dz|
+      voxels << {
+        x: x, y: y, z: ground_height + dz,
+        material: 'leaves',
+        color: leaf_colors.sample,
+        type: 'tree_leaves'
+      }
+    end
+  end
+  
+  def add_vegetation(cell, x, y, ground_height, voxels)
+    case cell.biome_type
+    when :grassland
+      # Tall grass
+      voxels << {
+        x: x, y: y, z: ground_height,
+        material: 'grass',
+        color: [0.1, 0.5 + rand * 0.2, 0.1],
+        type: 'grass'
+      }
+    when :desert
+      # Cactus occasionally
+      if rand < 0.1
+        cactus_height = rand(1..3)
+        (0...cactus_height).each do |dz|
+          voxels << {
+            x: x, y: y, z: ground_height + dz,
+            material: 'cactus',
+            color: [0.2, 0.6, 0.2],
+            type: 'cactus'
+          }
+        end
+      end
+    when :tundra
+      # Small shrubs
+      voxels << {
+        x: x, y: y, z: ground_height,
+        material: 'shrub',
+        color: [0.3, 0.4, 0.2],
+        type: 'shrub'
+      }
+    end
+  end
+  
+  def add_rock_formation(x, y, ground_height, voxels)
+    rock_height = rand(1..3)
+    rock_colors = [
+      [0.5, 0.5, 0.6],
+      [0.4, 0.4, 0.5],
+      [0.6, 0.6, 0.7]
+    ]
+    
+    (0...rock_height).each do |dz|
+      voxels << {
+        x: x, y: y, z: ground_height + dz,
+        material: 'rock',
+        color: rock_colors.sample,
+        type: 'rock'
+      }
+    end
+  end
+  
+  def add_dungeon_entrance(x, y, ground_height, voxels)
+    # Dark entrance portal
+    (0..2).each do |dz|
+      darkness = 0.1 + dz * 0.05
+      voxels << {
+        x: x, y: y, z: ground_height + dz,
+        material: 'dungeon_stone',
+        color: [darkness, darkness, darkness + 0.1],
+        type: 'dungeon'
+      }
+    end
+  end
+  
+  def add_ruins(x, y, ground_height, voxels)
+    # Broken stone columns
+    pillar_height = rand(1..4)
+    (0...pillar_height).each do |dz|
+      wear = dz * 0.1
+      voxels << {
+        x: x, y: y, z: ground_height + dz,
+        material: 'weathered_stone',
+        color: [0.4 + wear, 0.4 + wear, 0.5 + wear],
+        type: 'ruins'
+      }
+    end
+  end
+  
+  def add_surface_features(cell, x, y, ground_height, voxels)
+    # Add multi-voxel structures based on settlement type
+    case cell.settlement_type
+    when :city, :town
+      # Build tall structures
+      building_height = rand(3..6)
+      (0...building_height).each do |dz|
+        voxels << {
+          x: x, y: y, z: ground_height + dz,
+          material: 'stone_brick',
+          color: [0.6 + rand * 0.2, 0.6 + rand * 0.2, 0.7 + rand * 0.1],
+          type: 'building'
+        }
+      end
+      
+    when :village, :hamlet
+      # Build medium structures  
+      building_height = rand(2..4)
+      (0...building_height).each do |dz|
+        voxels << {
+          x: x, y: y, z: ground_height + dz,
+          material: 'wood',
+          color: [0.5 + rand * 0.2, 0.3 + rand * 0.2, 0.1 + rand * 0.1],
+          type: 'building'
+        }
+      end
+      
+    when :farmland
+      # Add crops at ground level
+      voxels << {
+        x: x, y: y, z: ground_height,
+        material: 'crops',
+        color: [0.8, 0.7 + rand * 0.1, 0.2 + rand * 0.2],
+        type: 'crops'
+      }
+    end
+    
+    # Add trees based on vegetation density
+    if cell.biome_type == :forest && cell.vegetation_density > 150
+      tree_height = rand(2..5)
+      
+      # Tree trunk
+      trunk_height = [tree_height - 1, 1].max
+      (0...trunk_height).each do |dz|
+        voxels << {
+          x: x, y: y, z: ground_height + dz,
+          material: 'wood',
+          color: [0.4, 0.25, 0.1],
+          type: 'tree_trunk'
+        }
+      end
+      
+      # Tree leaves (on top)
+      voxels << {
+        x: x, y: y, z: ground_height + trunk_height,
+        material: 'leaves',
+        color: [0.1 + rand * 0.1, 0.6 + rand * 0.2, 0.1 + rand * 0.1],
+        type: 'tree_leaves'
+      }
+      
+    elsif cell.vegetation_density > 128
+      # Add tall grass/shrubs
+      voxels << {
+        x: x, y: y, z: ground_height,
+        material: 'grass_tall',
+        color: [0.2, 0.5 + rand * 0.2, 0.2],
+        type: 'vegetation'
+      }
+    end
+    
+    # Add special feature structures
+    if cell.special_features.include?(:dungeon)
+      # Create entrance structure
+      (0..2).each do |dz|
+        voxels << {
+          x: x, y: y, z: ground_height + dz,
+          material: 'stone_dark',
+          color: [0.1 + dz * 0.1, 0.1 + dz * 0.1, 0.1 + dz * 0.1],
+          type: 'dungeon'
+        }
+      end
+      
+    elsif cell.special_features.include?(:ruins)
+      # Add broken pillars
+      pillar_height = rand(1..3)
+      (0...pillar_height).each do |dz|
+        voxels << {
+          x: x, y: y, z: ground_height + dz,
+          material: 'stone_weathered',
+          color: [0.4 + rand * 0.1, 0.4 + rand * 0.1, 0.5 + rand * 0.1],
+          type: 'ruins'
+        }
+      end
+    end
+    
+    # Add rocks/boulders on mountains
+    if cell.elevation > 200 && rand < 0.3
+      voxels << {
+        x: x, y: y, z: ground_height,
+        material: 'boulder',
+        color: [0.5, 0.5, 0.6],
+        type: 'rock'
+      }
+    end
+  end
+
+  def show_help
+    puts "world-generator - Generate complete D&D worlds with layered ecosystems"
+    puts ""
+    puts "USAGE:"
+    puts "  ./bin/world-generator [OPTIONS]"
+    puts ""
+    puts "OPTIONS:"
+    puts "  --size WIDTHxHEIGHT    World size (default: 80x40)"
+    puts "  --type TYPE            World type (default: balanced)"
+    puts "  --seed NUMBER          Random seed for reproducible worlds"
+    puts "  --output FILE          Save world to file (.txt or .json)"
+    puts "  --verbose              Show generation progress"
+    puts "  --show-layers LIST     Show specific layers (comma-separated)"
+    puts "  --help, -h             Show this help"
+    puts ""
+    puts "WORLD TYPES:"
+    WORLD_TYPES.each do |type, config|
+      puts "  #{type.ljust(12)} #{config[:name]}"
+    end
+    puts ""
+    puts "AVAILABLE LAYERS:"
+    puts "  elevation, water, climate, biome, vegetation, settlement, resources, danger"
+    puts ""
+    puts "EXAMPLES:"
+    puts "  ./bin/world-generator --type mountainous --size 100x50"
+    puts "  ./bin/world-generator --seed 12345 --output kingdom.txt"
+    puts "  ./bin/world-generator --show-layers elevation,water,settlement"
+    puts "  ./bin/world-generator --type archipelago --verbose --output islands.json"
+  end
+end
+
+if __FILE__ == $0
+  generator = WorldGenerator.new
+  generator.run(ARGV)
+end

@@ -1,0 +1,759 @@
+#!/usr/bin/env ruby
+
+require 'webrick'
+require 'json'
+
+class VoxelViewer
+  def initialize
+    @port = 8080
+    @voxel_file = nil
+    @world_name = "Generated World"
+  end
+  
+  def run(args)
+    parse_options(args)
+    
+    if args.include?('--help') || args.include?('-h')
+      show_help
+      return
+    end
+    
+    unless @voxel_file && File.exist?(@voxel_file)
+      puts "❌ Voxel file not found: #{@voxel_file}"
+      puts "Generate one with: ./bin/world-generator --show-layers voxel --output world.json"
+      return
+    end
+    
+    start_server
+  end
+  
+  private
+  
+  def parse_options(args)
+    args.each_with_index do |arg, i|
+      case arg
+      when '--file'
+        @voxel_file = args[i + 1] if args[i + 1]
+      when '--port'
+        @port = args[i + 1].to_i if args[i + 1]
+      when '--name'
+        @world_name = args[i + 1] if args[i + 1]
+      end
+    end
+    
+    # Auto-detect voxel file if not specified
+    if @voxel_file.nil?
+      voxel_files = Dir.glob("*_voxels.json")
+      @voxel_file = voxel_files.first if voxel_files.any?
+    end
+  end
+  
+  def start_server
+    puts "🌍 Starting voxel viewer for: #{@world_name}"
+    puts "📁 Loading voxel data from: #{@voxel_file}"
+    puts "🌐 Server starting at: http://localhost:#{@port}"
+    puts "🎮 Use WASD to move, mouse to look around"
+    puts "✨ Press Ctrl+C to stop"
+    
+    server = WEBrick::HTTPServer.new(Port: @port, DocumentRoot: '.')
+    
+    # Serve the main HTML page
+    server.mount_proc '/' do |req, res|
+      res.content_type = 'text/html'
+      res.body = generate_html_page
+    end
+    
+    # Serve voxel data as JSON
+    server.mount_proc '/voxels.json' do |req, res|
+      res.content_type = 'application/json'
+      res.body = File.read(@voxel_file)
+    end
+    
+    # Handle server shutdown gracefully
+    trap 'INT' do
+      puts "\n🛑 Shutting down voxel viewer..."
+      server.shutdown
+    end
+    
+    server.start
+  end
+  
+  def generate_html_page
+    <<~HTML
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>#{@world_name} - 3D Voxel Viewer</title>
+          <style>
+              body {
+                  margin: 0;
+                  padding: 0;
+                  background: #000;
+                  font-family: 'Courier New', monospace;
+                  overflow: hidden;
+              }
+              
+              #container {
+                  position: relative;
+                  width: 100vw;
+                  height: 100vh;
+              }
+              
+              #canvas {
+                  display: block;
+                  cursor: pointer;
+              }
+              
+              #ui {
+                  position: absolute;
+                  top: 10px;
+                  left: 10px;
+                  color: #fff;
+                  background: rgba(0, 0, 0, 0.7);
+                  padding: 10px;
+                  border-radius: 5px;
+                  font-size: 12px;
+                  max-width: 300px;
+              }
+              
+              #controls {
+                  position: absolute;
+                  bottom: 10px;
+                  left: 10px;
+                  color: #fff;
+                  background: rgba(0, 0, 0, 0.7);
+                  padding: 10px;
+                  border-radius: 5px;
+                  font-size: 11px;
+              }
+              
+              #loading {
+                  position: absolute;
+                  top: 50%;
+                  left: 50%;
+                  transform: translate(-50%, -50%);
+                  color: #fff;
+                  font-size: 18px;
+                  background: rgba(0, 0, 0, 0.8);
+                  padding: 20px;
+                  border-radius: 10px;
+              }
+              
+              .hidden {
+                  display: none;
+              }
+          </style>
+      </head>
+      <body>
+          <div id="container">
+              <canvas id="canvas"></canvas>
+              
+              <div id="loading">
+                  🧊 Loading #{@world_name}...
+              </div>
+              
+              <div id="ui" class="hidden">
+                  <h3>🌍 #{@world_name}</h3>
+                  <div id="stats"></div>
+                  <div id="camera-info"></div>
+              </div>
+              
+              <div id="controls" class="hidden">
+                  <strong>Controls:</strong><br>
+                  WASD - Move around<br>
+                  Mouse - Look around<br>
+                  Scroll - Zoom in/out<br>
+                  R - Reset camera<br>
+                  F - Toggle fullscreen
+              </div>
+          </div>
+          
+          <script>
+              #{generate_webgl_renderer}
+          </script>
+      </body>
+      </html>
+    HTML
+  end
+  
+  def generate_webgl_renderer
+    <<~JAVASCRIPT
+      // WebGL Voxel Renderer
+      class VoxelRenderer {
+          constructor(canvasId) {
+              this.canvas = document.getElementById(canvasId);
+              this.gl = this.canvas.getContext('webgl');
+              
+              if (!this.gl) {
+                  alert('WebGL not supported');
+                  return;
+              }
+              
+              this.setupCanvas();
+              this.setupShaders();
+              this.setupCamera();
+              this.setupControls();
+              this.loadVoxelData();
+          }
+          
+          setupCanvas() {
+              this.canvas.width = window.innerWidth;
+              this.canvas.height = window.innerHeight;
+              
+              this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+              this.gl.enable(this.gl.DEPTH_TEST);
+              this.gl.enable(this.gl.CULL_FACE);
+              this.gl.clearColor(0.5, 0.8, 1.0, 1.0); // Sky blue
+              
+              window.addEventListener('resize', () => {
+                  this.canvas.width = window.innerWidth;
+                  this.canvas.height = window.innerHeight;
+                  this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+              });
+          }
+          
+          setupShaders() {
+              const vertexSource = `
+                  attribute vec3 position;
+                  attribute vec3 color;
+                  attribute vec3 normal;
+                  
+                  uniform mat4 modelMatrix;
+                  uniform mat4 viewMatrix;
+                  uniform mat4 projectionMatrix;
+                  uniform vec3 lightDirection;
+                  
+                  varying vec3 vColor;
+                  varying float vLighting;
+                  
+                  void main() {
+                      // Combine all matrices into one
+                      mat4 mvpMatrix = projectionMatrix * viewMatrix * modelMatrix;
+                      gl_Position = mvpMatrix * vec4(position, 1.0);
+                      
+                      // Simple lighting calculation
+                      float lighting = max(0.4, dot(normal, normalize(vec3(0.5, 1.0, 0.5))));
+                      
+                      vColor = color;
+                      vLighting = lighting;
+                  }
+              `;
+              
+              const fragmentSource = `
+                  precision mediump float;
+                  
+                  varying vec3 vColor;
+                  varying float vLighting;
+                  
+                  void main() {
+                      gl_FragColor = vec4(vColor * vLighting, 1.0);
+                  }
+              `;
+              
+              this.program = this.createProgram(vertexSource, fragmentSource);
+              this.gl.useProgram(this.program);
+              
+              // Get uniform locations
+              this.uniforms = {
+                  modelMatrix: this.gl.getUniformLocation(this.program, 'modelMatrix'),
+                  viewMatrix: this.gl.getUniformLocation(this.program, 'viewMatrix'),
+                  projectionMatrix: this.gl.getUniformLocation(this.program, 'projectionMatrix'),
+                  lightDirection: this.gl.getUniformLocation(this.program, 'lightDirection')
+              };
+              
+              // Get attribute locations
+              this.attributes = {
+                  position: this.gl.getAttribLocation(this.program, 'position'),
+                  color: this.gl.getAttribLocation(this.program, 'color'),
+                  normal: this.gl.getAttribLocation(this.program, 'normal')
+              };
+          }
+          
+          createProgram(vertexSource, fragmentSource) {
+              const vertexShader = this.createShader(this.gl.VERTEX_SHADER, vertexSource);
+              const fragmentShader = this.createShader(this.gl.FRAGMENT_SHADER, fragmentSource);
+              
+              const program = this.gl.createProgram();
+              this.gl.attachShader(program, vertexShader);
+              this.gl.attachShader(program, fragmentShader);
+              this.gl.linkProgram(program);
+              
+              if (!this.gl.getProgramParameter(program, this.gl.LINK_STATUS)) {
+                  console.error('Program link error:', this.gl.getProgramInfoLog(program));
+              }
+              
+              return program;
+          }
+          
+          createShader(type, source) {
+              const shader = this.gl.createShader(type);
+              this.gl.shaderSource(shader, source);
+              this.gl.compileShader(shader);
+              
+              if (!this.gl.getShaderParameter(shader, this.gl.COMPILE_STATUS)) {
+                  console.error('Shader compile error:', this.gl.getShaderInfoLog(shader));
+              }
+              
+              return shader;
+          }
+          
+          setupCamera() {
+              this.camera = {
+                  position: [20, 25, 20],
+                  rotation: [-0.3, 0.7, 0],
+                  fov: 45 * Math.PI / 180,
+                  near: 0.1,
+                  far: 1000.0
+              };
+              
+              this.viewMatrix = new Float32Array(16);
+              this.projectionMatrix = new Float32Array(16);
+              this.modelMatrix = new Float32Array(16);
+              
+              // Set identity matrices
+              this.mat4Identity(this.modelMatrix);
+              this.updateProjectionMatrix();
+              this.updateViewMatrix();
+              
+              console.log('Camera initialized:', this.camera);
+          }
+          
+          setupControls() {
+              this.keys = {};
+              this.mouse = { x: 0, y: 0, down: false };
+              
+              // Keyboard controls
+              window.addEventListener('keydown', (e) => this.keys[e.code] = true);
+              window.addEventListener('keyup', (e) => this.keys[e.code] = false);
+              
+              // Mouse controls
+              this.canvas.addEventListener('click', (e) => {
+                  this.canvas.requestPointerLock();
+              });
+              
+              document.addEventListener('pointerlockchange', () => {
+                  if (document.pointerLockElement === this.canvas) {
+                      console.log('Pointer locked - mouse look enabled');
+                  } else {
+                      console.log('Pointer unlocked - click canvas to enable mouse look');
+                  }
+              });
+              
+              this.canvas.addEventListener('mousemove', (e) => {
+                  if (document.pointerLockElement === this.canvas) {
+                      this.camera.rotation[1] -= e.movementX * 0.002;
+                      this.camera.rotation[0] -= e.movementY * 0.002;
+                      this.camera.rotation[0] = Math.max(-Math.PI/2, Math.min(Math.PI/2, this.camera.rotation[0]));
+                      this.updateViewMatrix();
+                  }
+              });
+              
+              // Zoom with scroll
+              this.canvas.addEventListener('wheel', (e) => {
+                  const forward = this.getForwardVector();
+                  const speed = e.deltaY > 0 ? -1 : 1;
+                  
+                  this.camera.position[0] += forward[0] * speed;
+                  this.camera.position[1] += forward[1] * speed;
+                  this.camera.position[2] += forward[2] * speed;
+                  
+                  e.preventDefault();
+              });
+          }
+          
+          updateCamera() {
+              let moved = false;
+              const speed = 0.5;
+              
+              if (this.keys['KeyW']) {
+                  const forward = this.getForwardVector();
+                  this.camera.position[0] += forward[0] * speed;
+                  this.camera.position[2] += forward[2] * speed;
+                  moved = true;
+              }
+              
+              if (this.keys['KeyS']) {
+                  const forward = this.getForwardVector();
+                  this.camera.position[0] -= forward[0] * speed;
+                  this.camera.position[2] -= forward[2] * speed;
+                  moved = true;
+              }
+              
+              if (this.keys['KeyA']) {
+                  const right = this.getRightVector();
+                  this.camera.position[0] -= right[0] * speed;
+                  this.camera.position[2] -= right[2] * speed;
+                  moved = true;
+              }
+              
+              if (this.keys['KeyD']) {
+                  const right = this.getRightVector();
+                  this.camera.position[0] += right[0] * speed;
+                  this.camera.position[2] += right[2] * speed;
+                  moved = true;
+              }
+              
+              if (this.keys['Space']) {
+                  this.camera.position[1] += speed;
+                  moved = true;
+              }
+              
+              if (this.keys['ShiftLeft']) {
+                  this.camera.position[1] -= speed;
+                  moved = true;
+              }
+              
+              if (this.keys['KeyR']) {
+                  this.camera.position = [15, 30, 15];
+                  this.camera.rotation = [-0.5, 0.5, 0];
+                  moved = true;
+              }
+              
+              if (moved) {
+                  this.updateViewMatrix();
+                  this.updateUI();
+              }
+          }
+          
+          getForwardVector() {
+              const cosY = Math.cos(this.camera.rotation[1]);
+              const sinY = Math.sin(this.camera.rotation[1]);
+              return [-sinY, 0, -cosY];
+          }
+          
+          getRightVector() {
+              const cosY = Math.cos(this.camera.rotation[1]);
+              const sinY = Math.sin(this.camera.rotation[1]);
+              return [cosY, 0, -sinY];
+          }
+          
+          updateViewMatrix() {
+              this.mat4Identity(this.viewMatrix);
+              
+              // Apply rotation
+              this.mat4RotateX(this.viewMatrix, this.camera.rotation[0]);
+              this.mat4RotateY(this.viewMatrix, this.camera.rotation[1]);
+              
+              // Apply translation
+              this.mat4Translate(this.viewMatrix, 
+                  -this.camera.position[0], 
+                  -this.camera.position[1], 
+                  -this.camera.position[2]);
+          }
+          
+          updateProjectionMatrix() {
+              const aspect = this.canvas.width / this.canvas.height;
+              this.mat4Perspective(this.projectionMatrix, this.camera.fov, aspect, this.camera.near, this.camera.far);
+          }
+          
+          async loadVoxelData() {
+              try {
+                  console.log('Loading voxel data...');
+                  const response = await fetch('/voxels.json');
+                  const data = await response.json();
+                  
+                  console.log('Voxel data loaded:', {
+                      metadata: data.metadata,
+                      voxelCount: data.voxels.length,
+                      firstVoxel: data.voxels[0]
+                  });
+                  
+                  this.worldData = data;
+                  this.generateVoxelMesh(data.voxels);
+                  
+                  document.getElementById('loading').classList.add('hidden');
+                  document.getElementById('ui').classList.remove('hidden');
+                  document.getElementById('controls').classList.remove('hidden');
+                  
+                  this.updateUI();
+                  this.render();
+                  
+              } catch (error) {
+                  console.error('Failed to load voxel data:', error);
+                  document.getElementById('loading').textContent = '❌ Failed to load world data';
+              }
+          }
+          
+          generateVoxelMesh(voxels) {
+              console.log('Generating natural terrain mesh for', voxels.length, 'voxels...');
+              
+              const vertices = [];
+              const colors = [];
+              const normals = [];
+              
+              // Process all voxels (improved generation creates fewer, better voxels)
+              voxels.forEach(voxel => {
+                  this.addVoxelToMesh(voxel, vertices, colors, normals);
+              });
+              
+              this.vertexCount = vertices.length / 3;
+              
+              console.log('Generated natural terrain:', {
+                  vertexCount: this.vertexCount,
+                  triangles: this.vertexCount / 3,
+                  totalVoxels: voxels.length,
+                  vertices: vertices.length,
+                  colors: colors.length,
+                  normals: normals.length
+              });
+              
+              // Create and bind buffers
+              this.buffers = {
+                  position: this.createBuffer(new Float32Array(vertices)),
+                  color: this.createBuffer(new Float32Array(colors)),
+                  normal: this.createBuffer(new Float32Array(normals))
+              };
+              
+              console.log('Natural terrain buffers created successfully');
+          }
+          
+          addTestCube(vertices, colors, normals) {
+              // Add a bright red test cube at (0,0,0)
+              const testVoxel = {
+                  x: 0, y: 0, z: 0,
+                  color: [1.0, 0.0, 0.0] // Bright red
+              };
+              this.addVoxelToMesh(testVoxel, vertices, colors, normals);
+              
+              // Add another test cube at (5,5,5)
+              const testVoxel2 = {
+                  x: 5, y: 5, z: 5,
+                  color: [0.0, 1.0, 0.0] // Bright green
+              };
+              this.addVoxelToMesh(testVoxel2, vertices, colors, normals);
+          }
+          
+          addVoxelToMesh(voxel, vertices, colors, normals) {
+              // Scale coordinates for higher resolution voxels
+              const voxelSize = this.worldData.metadata.voxel_size || 1.0;
+              const x = voxel.x * voxelSize;
+              const y = voxel.z * voxelSize; // Note: z becomes y in 3D space  
+              const z = voxel.y * voxelSize;
+              
+              const color = voxel.color;
+              
+              // Define cube vertices for each face (counter-clockwise)
+              const s = voxelSize; // Voxel size
+              const cubeVertices = [
+                  // Front face (z+s)
+                  [x, y, z+s], [x+s, y, z+s], [x+s, y+s, z+s], [x, y+s, z+s],
+                  // Back face (z)  
+                  [x+s, y, z], [x, y, z], [x, y+s, z], [x+s, y+s, z],
+                  // Top face (y+s)
+                  [x, y+s, z], [x, y+s, z+s], [x+s, y+s, z+s], [x+s, y+s, z],
+                  // Bottom face (y)
+                  [x, y, z+s], [x, y, z], [x+s, y, z], [x+s, y, z+s],
+                  // Right face (x+s)
+                  [x+s, y, z+s], [x+s, y, z], [x+s, y+s, z], [x+s, y+s, z+s],
+                  // Left face (x)
+                  [x, y, z], [x, y, z+s], [x, y+s, z+s], [x, y+s, z]
+              ];
+              
+              const faceNormals = [
+                  [0, 0, 1],   // Front
+                  [0, 0, -1],  // Back
+                  [0, 1, 0],   // Top
+                  [0, -1, 0],  // Bottom
+                  [1, 0, 0],   // Right
+                  [-1, 0, 0]   // Left
+              ];
+              
+              // Add two triangles per face
+              for (let face = 0; face < 6; face++) {
+                  const faceOffset = face * 4;
+                  const normal = faceNormals[face];
+                  
+                  // First triangle (0, 1, 2)
+                  for (let i of [0, 1, 2]) {
+                      const vertex = cubeVertices[faceOffset + i];
+                      vertices.push(vertex[0], vertex[1], vertex[2]);
+                      colors.push(color[0], color[1], color[2]);
+                      normals.push(normal[0], normal[1], normal[2]);
+                  }
+                  
+                  // Second triangle (0, 2, 3)
+                  for (let i of [0, 2, 3]) {
+                      const vertex = cubeVertices[faceOffset + i];
+                      vertices.push(vertex[0], vertex[1], vertex[2]);
+                      colors.push(color[0], color[1], color[2]);
+                      normals.push(normal[0], normal[1], normal[2]);
+                  }
+              }
+          }
+          
+          createBuffer(data) {
+              const buffer = this.gl.createBuffer();
+              this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
+              this.gl.bufferData(this.gl.ARRAY_BUFFER, data, this.gl.STATIC_DRAW);
+              return buffer;
+          }
+          
+          render() {
+              this.updateCamera();
+              
+              this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
+              
+              if (!this.buffers || this.vertexCount === 0) {
+                  console.log('No data to render');
+                  requestAnimationFrame(() => this.render());
+                  return;
+              }
+              
+              // Set uniforms
+              this.gl.uniformMatrix4fv(this.uniforms.modelMatrix, false, this.modelMatrix);
+              this.gl.uniformMatrix4fv(this.uniforms.viewMatrix, false, this.viewMatrix);
+              this.gl.uniformMatrix4fv(this.uniforms.projectionMatrix, false, this.projectionMatrix);
+              this.gl.uniform3f(this.uniforms.lightDirection, 0.5, -1.0, 0.5);
+              
+              // Bind attributes
+              this.bindAttribute(this.buffers.position, this.attributes.position, 3);
+              this.bindAttribute(this.buffers.color, this.attributes.color, 3);
+              this.bindAttribute(this.buffers.normal, this.attributes.normal, 3);
+              
+              // Draw
+              this.gl.drawArrays(this.gl.TRIANGLES, 0, this.vertexCount);
+              
+              // Log occasionally for debugging
+              if (Math.random() < 0.01) {
+                  console.log('Render frame:', {
+                      vertexCount: this.vertexCount,
+                      camera: this.camera.position,
+                      rotation: this.camera.rotation
+                  });
+              }
+              
+              requestAnimationFrame(() => this.render());
+          }
+          
+          bindAttribute(buffer, location, size) {
+              this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
+              this.gl.enableVertexAttribArray(location);
+              this.gl.vertexAttribPointer(location, size, this.gl.FLOAT, false, 0, 0);
+          }
+          
+          updateUI() {
+              if (!this.worldData) return;
+              
+              const stats = document.getElementById('stats');
+              const cameraInfo = document.getElementById('camera-info');
+              
+              stats.innerHTML = `
+                  <strong>World Info:</strong><br>
+                  Size: ${this.worldData.metadata.width}x${this.worldData.metadata.height}<br>
+                  Voxels: ${this.worldData.voxels.length}<br>
+                  Type: ${this.worldData.metadata.world_type}<br>
+                  Seed: ${this.worldData.metadata.seed}
+              `;
+              
+              cameraInfo.innerHTML = `
+                  <strong>Camera:</strong><br>
+                  Position: ${this.camera.position.map(p => p.toFixed(1)).join(', ')}<br>
+                  Rotation: ${this.camera.rotation.map(r => (r * 180/Math.PI).toFixed(1)).join(', ')}°
+              `;
+          }
+          
+          // Matrix math functions
+          mat4Identity(out) {
+              out.fill(0);
+              out[0] = out[5] = out[10] = out[15] = 1;
+          }
+          
+          mat4Perspective(out, fovy, aspect, near, far) {
+              const f = 1.0 / Math.tan(fovy / 2);
+              const nf = 1 / (near - far);
+              
+              out.fill(0);
+              out[0] = f / aspect;
+              out[5] = f;
+              out[10] = (far + near) * nf;
+              out[11] = -1;
+              out[14] = 2 * far * near * nf;
+          }
+          
+          mat4RotateX(out, rad) {
+              const s = Math.sin(rad);
+              const c = Math.cos(rad);
+              
+              const a10 = out[4], a11 = out[5], a12 = out[6], a13 = out[7];
+              const a20 = out[8], a21 = out[9], a22 = out[10], a23 = out[11];
+              
+              out[4] = a10 * c + a20 * s;
+              out[5] = a11 * c + a21 * s;
+              out[6] = a12 * c + a22 * s;
+              out[7] = a13 * c + a23 * s;
+              out[8] = a20 * c - a10 * s;
+              out[9] = a21 * c - a11 * s;
+              out[10] = a22 * c - a12 * s;
+              out[11] = a23 * c - a13 * s;
+          }
+          
+          mat4RotateY(out, rad) {
+              const s = Math.sin(rad);
+              const c = Math.cos(rad);
+              
+              const a00 = out[0], a01 = out[1], a02 = out[2], a03 = out[3];
+              const a20 = out[8], a21 = out[9], a22 = out[10], a23 = out[11];
+              
+              out[0] = a00 * c - a20 * s;
+              out[1] = a01 * c - a21 * s;
+              out[2] = a02 * c - a22 * s;
+              out[3] = a03 * c - a23 * s;
+              out[8] = a00 * s + a20 * c;
+              out[9] = a01 * s + a21 * c;
+              out[10] = a02 * s + a22 * c;
+              out[11] = a03 * s + a23 * c;
+          }
+          
+          mat4Translate(out, x, y, z) {
+              out[12] = out[0] * x + out[4] * y + out[8] * z + out[12];
+              out[13] = out[1] * x + out[5] * y + out[9] * z + out[13];
+              out[14] = out[2] * x + out[6] * y + out[10] * z + out[14];
+              out[15] = out[3] * x + out[7] * y + out[11] * z + out[15];
+          }
+      }
+      
+      // Initialize the renderer when page loads
+      window.addEventListener('load', () => {
+          new VoxelRenderer('canvas');
+      });
+    JAVASCRIPT
+  end
+  
+  def show_help
+    puts "voxel-viewer - 3D WebGL viewer for generated voxel worlds"
+    puts ""
+    puts "USAGE:"
+    puts "  ./bin/voxel-viewer [OPTIONS]"
+    puts ""
+    puts "OPTIONS:"
+    puts "  --file FILE        Voxel JSON file to load"
+    puts "  --port PORT        Server port (default: 8080)"
+    puts "  --name NAME        World display name"
+    puts "  --help, -h         Show this help"
+    puts ""
+    puts "CONTROLS (in browser):"
+    puts "  WASD               Move around"
+    puts "  Mouse              Look around (click to enable)"
+    puts "  Scroll             Zoom in/out"
+    puts "  Space/Shift        Move up/down"
+    puts "  R                  Reset camera"
+    puts ""
+    puts "EXAMPLES:"
+    puts "  ./bin/voxel-viewer --file world_3d_voxels.json"
+    puts "  ./bin/voxel-viewer --port 3000 --name \"My Fantasy World\""
+    puts ""
+    puts "WORKFLOW:"
+    puts "  1. Generate voxel data:"
+    puts "     ./bin/world-generator --output world.json --show-layers voxel"
+    puts "  2. View in 3D:"
+    puts "     ./bin/voxel-viewer --file world_voxels.json"
+    puts "  3. Open browser to http://localhost:8080"
+  end
+end
+
+if __FILE__ == $0
+  viewer = VoxelViewer.new
+  viewer.run(ARGV)
+end
