@@ -301,11 +301,11 @@ class VoxelViewer
           
           setupCamera() {
               this.camera = {
-                  position: [20, 25, 20],
+                  position: [40, 30, 40], // Start higher and further for larger worlds
                   rotation: [-0.3, 0.7, 0],
                   fov: 45 * Math.PI / 180,
                   near: 0.1,
-                  far: 1000.0
+                  far: 2000.0  // Increase far plane for larger worlds
               };
               
               this.viewMatrix = new Float32Array(16);
@@ -406,8 +406,14 @@ class VoxelViewer
               }
               
               if (this.keys['KeyR']) {
-                  this.camera.position = [15, 30, 15];
-                  this.camera.rotation = [-0.5, 0.5, 0];
+                  // Reset camera to face center of the world
+                  const worldWidth = this.worldData.metadata.width;
+                  const worldHeight = this.worldData.metadata.height;
+                  const centerX = worldWidth / 2;
+                  const centerZ = worldHeight / 2;
+                  
+                  this.camera.position = [centerX + 20, 25, centerZ + 20];
+                  this.camera.rotation = [-0.4, -Math.PI/4, 0]; // Look toward center
                   moved = true;
               }
               

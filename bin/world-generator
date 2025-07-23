@@ -47,8 +47,8 @@ class WorldGenerator
   }
 
   def initialize
-    @width = 80
-    @height = 40
+    @width = 120  # Much larger default world
+    @height = 80
     @world_type = 'balanced'
     @seed = nil
     @output_file = nil
@@ -361,22 +361,21 @@ class WorldGenerator
   def generate_surface_voxels(grid)
     voxels = []
     
-    # Generate just surface terrain with detailed features
+    # Generate MINIMAL surface terrain with detailed features
     grid.each_cell do |x, y, cell|
-      ground_height = [(cell.elevation / 16.0).round, 1].max  # Very low terrain
+      # Just ONE base ground voxel per cell
+      ground_height = 0
       
-      # Add thin ground layer (just 1-2 voxels deep)
-      (0...ground_height).each do |z|
-        voxels << {
-          x: x, y: y, z: z,
-          material: 'ground',
-          color: determine_ground_color(cell),
-          type: 'ground'
-        }
-      end
+      # Single ground voxel as base
+      voxels << {
+        x: x, y: y, z: ground_height,
+        material: 'ground',
+        color: determine_ground_color(cell),
+        type: 'ground'
+      }
       
-      # Add detailed surface features
-      add_detailed_surface_features(cell, x, y, ground_height, voxels)
+      # Add detailed surface features ON TOP of the single ground layer
+      add_detailed_surface_features(cell, x, y, ground_height + 1, voxels)
     end
     
     voxels
@@ -516,16 +515,18 @@ class WorldGenerator
   end
   
   def add_detailed_surface_features(cell, x, y, ground_height, voxels)
-    # Add settlements as detailed structures
+    # ALWAYS add something based on the terrain type to ensure visibility
+    
+    # Handle settlements with higher priority
     case cell.settlement_type
     when :city, :town
-      # Create detailed buildings with windows and roofs
-      building_height = rand(4..8)
+      # Create compact buildings (2-3 voxels high max)
+      building_height = rand(2..3)
       (0...building_height).each do |dz|
         color = if dz == building_height - 1
           [0.8, 0.3, 0.2]  # Red roof
         else
-          [0.7 + rand * 0.1, 0.7 + rand * 0.1, 0.8]  # Gray walls
+          [0.7, 0.7, 0.8]  # Gray walls
         end
         
         voxels << {
@@ -535,12 +536,13 @@ class WorldGenerator
           type: 'building'
         }
       end
+      return # Early return - settlement overrides other features
       
     when :village, :hamlet
-      # Smaller houses with chimneys
-      building_height = rand(2..4)
+      # Small houses (1-2 voxels high)
+      building_height = rand(1..2)
       (0...building_height).each do |dz|
-        color = if dz == building_height - 1
+        color = if building_height > 1 && dz == building_height - 1
           [0.6, 0.4, 0.2]  # Brown roof
         else
           [0.9, 0.8, 0.7]  # Light walls
@@ -553,47 +555,92 @@ class WorldGenerator
           type: 'house'
         }
       end
-      
-      # Add chimney smoke occasionally
-      if rand < 0.3
-        voxels << {
-          x: x, y: y, z: ground_height + building_height,
-          material: 'smoke',
-          color: [0.8, 0.8, 0.9],
-          type: 'smoke'
-        }
-      end
+      return # Early return - settlement overrides other features
       
     when :farmland
-      # Add detailed crops
-      if rand < 0.8  # 80% chance of crops
+      # Add crops at ground level (no height)
+      voxels << {
+        x: x, y: y, z: ground_height,
+        material: 'crops',
+        color: [0.9, 0.8, 0.3 + rand * 0.2],
+        type: 'crops'
+      }
+      return # Early return - farmland overrides other features
+    end
+    
+    # For non-settlement areas, add terrain-appropriate features
+    case cell.biome_type
+    when :forest
+      # More variety in forests
+      rand_val = rand
+      if rand_val < 0.5  # 50% chance of trees
+        add_detailed_tree(x, y, ground_height, voxels)
+      elsif rand_val < 0.7  # 20% chance of larger trees
+        add_large_tree(x, y, ground_height, voxels)
+      elsif rand_val < 0.85  # 15% chance of berry bushes
+        add_berry_bush(x, y, ground_height, voxels)
+      else # 15% chance of mushrooms
+        add_mushrooms(x, y, ground_height, voxels)
+      end
+      
+    when :grassland
+      # More variety in grasslands
+      rand_val = rand
+      if rand_val < 0.2  # 20% chance of tall grass
         voxels << {
           x: x, y: y, z: ground_height,
-          material: 'crops',
-          color: [0.9, 0.8, 0.3 + rand * 0.2],
-          type: 'crops'
+          material: 'grass',
+          color: [0.1, 0.5 + rand * 0.2, 0.1],
+          type: 'grass'
         }
+      elsif rand_val < 0.25  # 5% chance of wildflowers
+        add_wildflowers(x, y, ground_height, voxels)
+      elsif rand_val < 0.28  # 3% chance of standing stones
+        add_standing_stone(x, y, ground_height, voxels)
+      end
+      
+    when :mountain
+      # More variety on mountains
+      rand_val = rand
+      if rand_val < 0.6  # 60% chance of rocks
+        add_rock_formation(x, y, ground_height, voxels)
+      elsif rand_val < 0.65  # 5% chance of crystal formation
+        add_crystal_formation(x, y, ground_height, voxels)
+      elsif rand_val < 0.67  # 2% chance of mountain shrine
+        add_mountain_shrine(x, y, ground_height, voxels)
+      end
+      
+    when :desert
+      # More variety in deserts
+      rand_val = rand
+      if rand_val < 0.08  # 8% chance of cactus
+        cactus_height = rand(1..2)
+        (0...cactus_height).each do |dz|
+          voxels << {
+            x: x, y: y, z: ground_height + dz,
+            material: 'cactus',
+            color: [0.2, 0.6, 0.2],
+            type: 'cactus'
+          }
+        end
+      elsif rand_val < 0.12  # 4% chance of desert obelisk
+        add_desert_obelisk(x, y, ground_height, voxels)
+      elsif rand_val < 0.15  # 3% chance of bone pile
+        add_bone_pile(x, y, ground_height, voxels)
       end
     end
     
-    # Add detailed trees based on forest density
-    if cell.biome_type == :forest && cell.vegetation_density > 100
-      if rand < (cell.vegetation_density / 255.0)  # Probability based on density
-        add_detailed_tree(x, y, ground_height, voxels)
-      end
+    # Add occasional procedural structures regardless of biome
+    structure_rand = rand
+    if structure_rand < 0.001  # 0.1% chance of watchtower
+      add_watchtower(x, y, ground_height, voxels)
+    elsif structure_rand < 0.002  # 0.1% chance of bridge piece
+      add_bridge_section(x, y, ground_height, voxels)
+    elsif structure_rand < 0.003  # 0.1% chance of monument
+      add_monument(x, y, ground_height, voxels)
     end
     
-    # Add random vegetation
-    if cell.vegetation_density > 64 && rand < 0.4
-      add_vegetation(cell, x, y, ground_height, voxels)
-    end
-    
-    # Add rocks and boulders
-    if cell.elevation > 150 && rand < 0.2
-      add_rock_formation(x, y, ground_height, voxels)
-    end
-    
-    # Add special feature details
+    # Add special feature details (rare but visible)
     if cell.special_features.include?(:dungeon)
       add_dungeon_entrance(x, y, ground_height, voxels)
     elsif cell.special_features.include?(:ruins)
@@ -602,31 +649,30 @@ class WorldGenerator
   end
   
   def add_detailed_tree(x, y, ground_height, voxels)
-    tree_height = rand(3..7)
-    trunk_height = tree_height - 2
+    # Much more compact trees (1-2 voxels max)
+    tree_height = rand(1..2)
     
-    # Tree trunk (brown)
-    (0...trunk_height).each do |dz|
+    if tree_height == 1
+      # Just leaves at ground level
       voxels << {
-        x: x, y: y, z: ground_height + dz,
+        x: x, y: y, z: ground_height,
+        material: 'leaves',
+        color: [0.1, 0.6, 0.1],
+        type: 'tree_leaves'
+      }
+    else
+      # Trunk + leaves
+      voxels << {
+        x: x, y: y, z: ground_height,
         material: 'wood',
-        color: [0.4 + rand * 0.1, 0.2 + rand * 0.1, 0.1],
+        color: [0.4, 0.2, 0.1],
         type: 'tree_trunk'
       }
-    end
-    
-    # Tree leaves (green cloud on top)
-    leaf_colors = [
-      [0.1, 0.6, 0.1],
-      [0.2, 0.7, 0.2], 
-      [0.0, 0.5, 0.0]
-    ]
-    
-    (trunk_height...(trunk_height + 2)).each do |dz|
+      
       voxels << {
-        x: x, y: y, z: ground_height + dz,
+        x: x, y: y, z: ground_height + 1,
         material: 'leaves',
-        color: leaf_colors.sample,
+        color: [0.1, 0.6, 0.1],
         type: 'tree_leaves'
       }
     end
@@ -667,7 +713,8 @@ class WorldGenerator
   end
   
   def add_rock_formation(x, y, ground_height, voxels)
-    rock_height = rand(1..3)
+    # Very compact rocks (just 1 voxel usually)
+    rock_height = rand < 0.7 ? 1 : 2  # 70% chance of 1 voxel, 30% chance of 2
     rock_colors = [
       [0.5, 0.5, 0.6],
       [0.4, 0.4, 0.5],
@@ -813,6 +860,169 @@ class WorldGenerator
         material: 'boulder',
         color: [0.5, 0.5, 0.6],
         type: 'rock'
+      }
+    end
+  end
+  
+  # New procedural feature functions
+  def add_large_tree(x, y, ground_height, voxels)
+    # Larger trees (2-3 voxels)
+    tree_height = rand(2..3)
+    
+    # Trunk
+    voxels << {
+      x: x, y: y, z: ground_height,
+      material: 'wood',
+      color: [0.35, 0.18, 0.1],
+      type: 'tree_trunk'
+    }
+    
+    # Leaves on top
+    (1...tree_height).each do |dz|
+      voxels << {
+        x: x, y: y, z: ground_height + dz,
+        material: 'leaves',
+        color: [0.05, 0.5 + rand * 0.2, 0.05],
+        type: 'tree_leaves'
+      }
+    end
+  end
+  
+  def add_berry_bush(x, y, ground_height, voxels)
+    voxels << {
+      x: x, y: y, z: ground_height,
+      material: 'berry_bush',
+      color: [0.3, 0.5, 0.1],
+      type: 'vegetation'
+    }
+  end
+  
+  def add_mushrooms(x, y, ground_height, voxels)
+    # Random colored mushrooms
+    mushroom_colors = [
+      [0.8, 0.3, 0.3],  # Red
+      [0.6, 0.4, 0.1],  # Brown
+      [0.7, 0.7, 0.9],  # Purple-ish
+    ]
+    
+    voxels << {
+      x: x, y: y, z: ground_height,
+      material: 'mushroom',
+      color: mushroom_colors.sample,
+      type: 'mushroom'
+    }
+  end
+  
+  def add_wildflowers(x, y, ground_height, voxels)
+    flower_colors = [
+      [0.9, 0.2, 0.3],  # Red
+      [0.9, 0.8, 0.1],  # Yellow
+      [0.6, 0.3, 0.9],  # Purple
+      [0.9, 0.5, 0.8],  # Pink
+    ]
+    
+    voxels << {
+      x: x, y: y, z: ground_height,
+      material: 'flowers',
+      color: flower_colors.sample,
+      type: 'flowers'
+    }
+  end
+  
+  def add_standing_stone(x, y, ground_height, voxels)
+    stone_height = rand(1..2)
+    (0...stone_height).each do |dz|
+      voxels << {
+        x: x, y: y, z: ground_height + dz,
+        material: 'standing_stone',
+        color: [0.4, 0.4, 0.5],
+        type: 'monument'
+      }
+    end
+  end
+  
+  def add_crystal_formation(x, y, ground_height, voxels)
+    crystal_colors = [
+      [0.7, 0.9, 1.0],   # Blue crystal
+      [0.9, 0.7, 1.0],   # Purple crystal
+      [0.7, 1.0, 0.8],   # Green crystal
+    ]
+    
+    voxels << {
+      x: x, y: y, z: ground_height,
+      material: 'crystal',
+      color: crystal_colors.sample,
+      type: 'crystal'
+    }
+  end
+  
+  def add_mountain_shrine(x, y, ground_height, voxels)
+    (0..1).each do |dz|
+      voxels << {
+        x: x, y: y, z: ground_height + dz,
+        material: 'shrine_stone',
+        color: [0.6, 0.6, 0.7],
+        type: 'shrine'
+      }
+    end
+  end
+  
+  def add_desert_obelisk(x, y, ground_height, voxels)
+    obelisk_height = rand(2..3)
+    (0...obelisk_height).each do |dz|
+      voxels << {
+        x: x, y: y, z: ground_height + dz,
+        material: 'sandstone',
+        color: [0.9, 0.8, 0.5],
+        type: 'obelisk'
+      }
+    end
+  end
+  
+  def add_bone_pile(x, y, ground_height, voxels)
+    voxels << {
+      x: x, y: y, z: ground_height,
+      material: 'bones',
+      color: [0.9, 0.9, 0.8],
+      type: 'bones'
+    }
+  end
+  
+  def add_watchtower(x, y, ground_height, voxels)
+    tower_height = rand(3..4)
+    (0...tower_height).each do |dz|
+      color = if dz == tower_height - 1
+        [0.5, 0.3, 0.2]  # Roof
+      else
+        [0.6, 0.6, 0.7]  # Stone walls
+      end
+      
+      voxels << {
+        x: x, y: y, z: ground_height + dz,
+        material: 'tower_stone',
+        color: color,
+        type: 'watchtower'
+      }
+    end
+  end
+  
+  def add_bridge_section(x, y, ground_height, voxels)
+    voxels << {
+      x: x, y: y, z: ground_height,
+      material: 'bridge_wood',
+      color: [0.5, 0.3, 0.1],
+      type: 'bridge'
+    }
+  end
+  
+  def add_monument(x, y, ground_height, voxels)
+    monument_height = rand(2..3)
+    (0...monument_height).each do |dz|
+      voxels << {
+        x: x, y: y, z: ground_height + dz,
+        material: 'monument_stone',
+        color: [0.4, 0.4, 0.5],
+        type: 'monument'
       }
     end
   end
